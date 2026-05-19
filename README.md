@@ -24,10 +24,8 @@ Built by [Ritwik Bisht](https://github.com/ritwik-bisht) iteratively with Claude
 
 ## Install
 
-This repo is **private** — you need to be a collaborator on `ritwik-bisht/auto-tune` for the clone to succeed. The `find-skills` install flow does not work with private repos; use the manual path below.
-
 ```bash
-git clone git@github.com:ritwik-bisht/auto-tune.git ~/.agents/skills/auto-tune-src
+git clone https://github.com/ritwik-bisht/auto-tune.git ~/.agents/skills/auto-tune-src
 ln -s ~/.agents/skills/auto-tune-src/skills/auto-tune ~/.agents/skills/auto-tune
 ln -s ~/.agents/skills/auto-tune ~/.claude/skills/auto-tune
 ```
@@ -37,15 +35,15 @@ Then add an entry to `~/.agents/.skill-lock.json` so Claude Code lists it as ava
 ```json
 "auto-tune": {
   "source": "ritwik-bisht/auto-tune",
-  "sourceType": "github-private",
-  "sourceUrl": "git@github.com:ritwik-bisht/auto-tune.git",
+  "sourceType": "github",
+  "sourceUrl": "https://github.com/ritwik-bisht/auto-tune.git",
   "skillPath": "skills/auto-tune/SKILL.md",
   "installedAt": "2026-05-19T00:00:00.000Z",
   "updatedAt": "2026-05-19T00:00:00.000Z"
 }
 ```
 
-Restart your Claude Code session after editing skill-lock.json so the new skill is picked up.
+Restart your Claude Code session after editing skill-lock.json so the new skill is picked up. (`find-skills` should also work once this repo is publicly indexed.)
 
 ## Use
 
