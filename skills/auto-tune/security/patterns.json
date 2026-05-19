@@ -1,0 +1,44 @@
+{
+  "patterns": [
+    {
+      "name": "prompt_injection_marker",
+      "regex": "(?i)\\b(ignore (the )?(previous|prior|all|above) (instructions?|prompts?|context)|you are now (a|an)|disregard (all|previous|prior)|new instructions?:|<\\s*system\\s*>|forget (everything|all) (above|prior))",
+      "severity": "high"
+    },
+    {
+      "name": "shell_pipe_install",
+      "regex": "(?i)(curl|wget|fetch)[^\\n]{1,200}\\|\\s*(sh|bash|zsh|sudo)",
+      "severity": "high"
+    },
+    {
+      "name": "home_credential_path",
+      "regex": "(?i)(~/\\.ssh|~/\\.aws|~/\\.config/gh|~/\\.npmrc|~/\\.pypirc|~/\\.docker/config|~/\\.kube/config|/etc/passwd|/etc/shadow)",
+      "severity": "high"
+    },
+    {
+      "name": "base64_blob",
+      "regex": "(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{4096,}={0,2}(?![A-Za-z0-9+/=])",
+      "severity": "medium"
+    },
+    {
+      "name": "exfil_callback",
+      "regex": "(?i)(webhook\\.site|requestbin\\.com|requestbin\\.net|pipedream\\.net|ngrok\\.io|ngrok-free\\.app|interact\\.sh|burpcollaborator\\.net|oast\\.\\w+|canarytokens\\.com)",
+      "severity": "high"
+    },
+    {
+      "name": "raw_ip_url",
+      "regex": "https?://(?:\\d{1,3}\\.){3}\\d{1,3}(?::\\d+)?(/|\\b)",
+      "severity": "medium"
+    },
+    {
+      "name": "powershell_iex",
+      "regex": "(?i)(invoke-expression|iex\\s*\\(|downloadstring\\s*\\()",
+      "severity": "high"
+    },
+    {
+      "name": "env_var_exfil",
+      "regex": "(?i)(printenv|env\\s*\\||\\$\\{?(GITHUB_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|XAI_API_KEY|AWS_SECRET|GITHUB_PAT)\\}?)",
+      "severity": "high"
+    }
+  ]
+}

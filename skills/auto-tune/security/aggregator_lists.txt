@@ -1,0 +1,8 @@
+# auto-tune aggregator-list seeds
+# One URL per line, must point to a raw markdown / README of an awesome-claude-code style list.
+# All URLs are subject to the allowlist before fetch.
+# community.py reads these and extracts every github.com / gist.github.com link from the body.
+
+https://raw.githubusercontent.com/hesreallyhim/awesome-claude-code/main/README.md
+https://raw.githubusercontent.com/anthropics/skills/main/README.md
+https://raw.githubusercontent.com/vercel-labs/skills/main/README.md

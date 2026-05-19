@@ -1,0 +1,31 @@
+# auto-tune security allowlist
+# One host per line. Lines starting with # are comments.
+# Wildcards: *.example.com matches any subdomain.
+# Exact hosts: github.com matches only github.com (not www.github.com).
+# Use *.github.com if you also want subdomains.
+
+github.com
+*.github.com
+raw.githubusercontent.com
+api.github.com
+codeload.github.com
+gist.github.com
+gist.githubusercontent.com
+
+*.anthropic.com
+docs.anthropic.com
+
+*.vercel.com
+vercel-labs.com
+
+api.x.ai
+
+*.npmjs.org
+registry.npmjs.org
+
+www.reddit.com
+old.reddit.com
+*.reddit.com
+
+hn.algolia.com
+news.ycombinator.com

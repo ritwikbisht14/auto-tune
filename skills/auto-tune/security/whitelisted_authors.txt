@@ -1,0 +1,4 @@
+# auto-tune whitelisted-authors list
+# GitHub usernames here bypass the spam-username heuristic in discover.py.
+# Use this when a legit author happens to match the bot-pattern regex (e.g. a real human whose handle ends in digits).
+# One username per line, case-insensitive. Lines starting with # are comments.
