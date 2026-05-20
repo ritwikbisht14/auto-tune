@@ -383,6 +383,20 @@ def propose_external_candidates(candidates_path: Path) -> list[dict]:
         ]
         if qc.get("trust"):
             rationale_parts.append("trusted-author")
+        insp = c.get("inspection") or {}
+        structure_bits: list[str] = []
+        if insp.get("skill_md_path"):
+            structure_bits.append(f"SKILL.md={insp['skill_md_path']}")
+        if insp.get("examples_dir"):
+            structure_bits.append("examples/")
+        if insp.get("tests_dir"):
+            structure_bits.append("tests/")
+        if insp.get("scripts_dir"):
+            structure_bits.append("scripts/")
+        if insp.get("has_releases"):
+            structure_bits.append(f"release {insp.get('release_latest_tag','')}")
+        if structure_bits:
+            rationale_parts.append("structure: " + ", ".join(structure_bits))
         proposals.append({
             "id": f"{kind}:{slug}",
             "type": kind,

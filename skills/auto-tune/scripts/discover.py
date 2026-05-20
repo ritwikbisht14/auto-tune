@@ -175,6 +175,104 @@ def quality_score(role_rel: float, popularity: int, popularity_kind: str,
     }
 
 
+SKILL_DIR_NAMES = {"skills", "skill", "agents", "agent-skills"}
+EXAMPLES_DIR_NAMES = {"examples", "example", "demos", "demo", "samples"}
+TESTS_DIR_NAMES = {"tests", "test", "__tests__", "spec", "specs"}
+
+
+def _gh_get_contents(owner: str, repo: str, path: str, security_mod) -> tuple[list | dict | None, str | None]:
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}".rstrip("/")
+    if not security_mod.check_url(url)["allowed"]:
+        return None, "blocked"
+    data, err = _github_request(url, use_token=True)
+    if err and err.startswith("HTTP 401"):
+        data, err = _github_request(url, use_token=False)
+    return data, err
+
+
+def deep_inspect_github(html_url: str, security_mod) -> dict | None:
+    """Fetch a tiny amount of repo structure (one or two API calls) to know
+    whether the candidate is *actually* a skill, not just a tagged repo."""
+    m = re.match(r"^https?://github\.com/([^/]+)/([^/?#]+)", html_url or "")
+    if not m:
+        return None
+    owner, repo = m.group(1), m.group(2)
+
+    out = {
+        "owner": owner,
+        "repo": repo,
+        "skill_md_path": None,
+        "skill_md_frontmatter": None,
+        "examples_dir": False,
+        "tests_dir": False,
+        "scripts_dir": False,
+        "has_releases": False,
+        "release_latest_tag": None,
+    }
+
+    contents, err = _gh_get_contents(owner, repo, "", security_mod)
+    if err or not isinstance(contents, list):
+        return out
+
+    skills_dir_path: str | None = None
+    for entry in contents:
+        nm = (entry.get("name") or "").lower()
+        et = entry.get("type")
+        if nm == "skill.md" and et == "file":
+            out["skill_md_path"] = entry.get("path")
+        elif et == "dir":
+            if nm in SKILL_DIR_NAMES:
+                skills_dir_path = entry.get("path")
+            elif nm in EXAMPLES_DIR_NAMES:
+                out["examples_dir"] = True
+            elif nm in TESTS_DIR_NAMES:
+                out["tests_dir"] = True
+            elif nm == "scripts":
+                out["scripts_dir"] = True
+
+    if not out["skill_md_path"] and skills_dir_path:
+        sub, sub_err = _gh_get_contents(owner, repo, skills_dir_path, security_mod)
+        if not sub_err and isinstance(sub, list):
+            for entry in sub:
+                if entry.get("type") == "dir":
+                    sk_path = f"{entry.get('path')}/SKILL.md"
+                    sk, sk_err = _gh_get_contents(owner, repo, sk_path, security_mod)
+                    if not sk_err and isinstance(sk, dict) and sk.get("type") == "file":
+                        out["skill_md_path"] = sk.get("path")
+                        break
+                elif entry.get("type") == "file" and (entry.get("name") or "").lower() == "skill.md":
+                    out["skill_md_path"] = entry.get("path")
+                    break
+
+    releases_url = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=1"
+    if security_mod.check_url(releases_url)["allowed"]:
+        rdata, rerr = _github_request(releases_url, use_token=True)
+        if rerr and rerr.startswith("HTTP 401"):
+            rdata, rerr = _github_request(releases_url, use_token=False)
+        if not rerr and isinstance(rdata, list) and rdata:
+            out["has_releases"] = True
+            out["release_latest_tag"] = (rdata[0] or {}).get("tag_name")
+
+    return out
+
+
+def structure_score(insp: dict | None) -> float:
+    if not insp:
+        return 0.0
+    s = 0.0
+    if insp.get("skill_md_path"):
+        s += 0.55
+    if insp.get("examples_dir"):
+        s += 0.12
+    if insp.get("tests_dir"):
+        s += 0.12
+    if insp.get("scripts_dir"):
+        s += 0.08
+    if insp.get("has_releases"):
+        s += 0.13
+    return min(1.0, s)
+
+
 def _github_request(url: str, use_token: bool) -> tuple[dict | None, str | None]:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "auto-tune-discover/0.2"}
     if use_token:
@@ -598,6 +696,25 @@ def main(argv: list[str]) -> int:
             "quarantine_sha256": sha256,
             "findings": findings,
         })
+
+    candidates.sort(key=lambda c: -c.get("quality_score", 0.0))
+
+    DEEP_INSPECT_TOP_N = 12
+    STRUCTURE_BONUS = 0.20
+    for c in candidates[:DEEP_INSPECT_TOP_N]:
+        html = c.get("html_url") or ""
+        if "github.com" not in html:
+            continue
+        insp = deep_inspect_github(html, security)
+        c["inspection"] = insp
+        s_score = structure_score(insp)
+        c["structure_score"] = round(s_score, 3)
+        c["quality_score_v1"] = c.get("quality_score", 0.0)
+        c["quality_score"] = round(min(1.0, c["quality_score_v1"] + s_score * STRUCTURE_BONUS), 3)
+        c["quality_components"] = {
+            **(c.get("quality_components") or {}),
+            "structure": round(s_score, 3),
+        }
 
     candidates.sort(key=lambda c: -c.get("quality_score", 0.0))
 
