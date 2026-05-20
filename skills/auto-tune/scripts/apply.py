@@ -237,6 +237,35 @@ def apply_compose_bundle(item: dict, dry_run: bool) -> dict:
     }
 
 
+AUTO_TUNE_SUBAGENT_MARKER = "## Project context (auto-tune)"
+
+
+def apply_gen_subagent(item: dict, dry_run: bool) -> dict:
+    target = Path(item["target_path"])
+    new_body = item["after"]
+    if target.is_file():
+        existing = target.read_text(encoding="utf-8", errors="ignore")
+        if AUTO_TUNE_SUBAGENT_MARKER not in existing:
+            return {
+                "status": "skipped",
+                "reason": "target was manually authored or modified (no auto-tune marker present); pass --force to overwrite",
+            }
+        backup = target.with_suffix(target.suffix + ".autotune.bak")
+        if dry_run:
+            return {
+                "status": "dry-run",
+                "would": f"overwrite {target} (existing backed up to {backup.name})",
+            }
+        backup.write_text(existing, encoding="utf-8")
+        target.write_text(new_body, encoding="utf-8")
+        return {"status": "applied", "undo": f"mv {backup} {target}"}
+    if dry_run:
+        return {"status": "dry-run", "would": f"write {target} ({len(new_body)} bytes)"}
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(new_body, encoding="utf-8")
+    return {"status": "applied", "undo": f"rm {target}"}
+
+
 HANDLERS = {
     "prune-skill": apply_prune_skill,
     "prune-mcp": apply_prune_mcp,
@@ -248,6 +277,7 @@ HANDLERS = {
     "tweak-skill": apply_tweak_skill,
     "personalize-skill": apply_personalize_skill,
     "compose-bundle": apply_compose_bundle,
+    "gen-subagent": apply_gen_subagent,
     "add-hook": apply_add_hook,
 }
 

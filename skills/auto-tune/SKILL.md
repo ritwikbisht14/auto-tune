@@ -83,6 +83,14 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
 
    The opinion map (`FACETS` constant in compose.py) is curated by hand — primary picks reflect editorial judgment. Edit the constant to change the picks. If a facet is `uncovered`, surface that to the user; the only honest fix is for them to find a new skill manually.
 
+5b. **Subagent chain** (always, after compose). Generate the role's subagent chain — for designer that's orchestrator + 5 specialists (researcher / spec-writer / implementer / polish-reviewer / handoff). Each subagent's body is filled with: the user's actually-installed skills, the user's actually-installed MCPs (in `## Data sources` as "Connected now"), project memory rules, and recent correction patterns. Missing data-source MCPs (Pendo / Mixpanel / Dovetail / Mobbin) are listed as "manual paste — ask the user."
+   ```
+   python3 ~/.agents/skills/auto-tune/scripts/subagents.py --role <role> --cwd <pwd>
+   ```
+   Output: `cache/subagent_drafts.json` containing one entry per subagent (target path, body, rationale, missing-skill/MCP diagnostics).
+
+   The chain map (`CHAINS` constant in subagents.py) is curated by hand per role. PM and engineer are scoffolded but their bodies are deferred to v5. If the user requests a role with no chain defined, surface "no chain for this role yet" cleanly.
+
 6. **Detect corrections** (always, unless `--corrections-only` is set in which case skip 3 and 4):
    ```
    python3 ~/.agents/skills/auto-tune/scripts/corrections.py --out ~/.agents/skills/auto-tune/cache/corrections.json
@@ -103,6 +111,9 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    - `add-skill-external` — community skills already quarantined-clean, ready to promote
    - `recommend-agent-external` — community projects worth manual review (link only)
    - `tweak-skill` — additive constraint lines to append to an existing skill's SKILL.md
+   - `personalize-skill` — append a `## Project context (auto-tune)` block to a picked skill
+   - `compose-bundle` — read-only summary of the role's composed bundle
+   - `gen-subagent` — write a generated subagent to `~/.claude/agents/<name>.md`
    - `add-hook` — security `PreToolUse` URL-allowlist hook in `~/.claude/settings.json`
 
    For each group, render a short summary + per-item rationale + estimated token savings. Keep it scannable; show the full `after` content only on request.

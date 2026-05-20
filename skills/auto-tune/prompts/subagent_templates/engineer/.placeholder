@@ -1,0 +1,10 @@
+# TODO v5: engineer subagent chain
+#
+# Planned specialists:
+#   engineer-fullstack (orchestrator)
+#   engineer-investigator (root-cause analysis)
+#   engineer-implementer (write code)
+#   engineer-test-writer (write or extend tests)
+#   engineer-reviewer (self-review before opening PR)
+#
+# Same generator pattern as designer/*.md.tmpl.

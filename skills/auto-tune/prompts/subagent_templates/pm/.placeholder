@@ -1,0 +1,10 @@
+# TODO v5: PM subagent chain
+#
+# Planned specialists:
+#   pm-fullstack (orchestrator)
+#   pm-discovery (interview synthesis, stakeholder framing)
+#   pm-prd-writer (PRD authoring)
+#   pm-ticket-decomposer (split PRD into Jira / Linear tickets)
+#   pm-rollout-planner (release timeline, risk plan)
+#
+# Same generator pattern as designer/*.md.tmpl.

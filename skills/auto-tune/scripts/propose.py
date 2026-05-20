@@ -532,6 +532,32 @@ def propose_compose_summary(composition_path: Path) -> list[dict]:
     }]
 
 
+def propose_subagents(drafts_path: Path) -> list[dict]:
+    if not drafts_path.is_file():
+        return []
+    try:
+        data = json.loads(drafts_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    proposals: list[dict] = []
+    for draft in data.get("drafts", []):
+        target = Path(draft["target_path"])
+        proposals.append({
+            "id": f"gen-subagent:{draft['name']}",
+            "type": "gen-subagent",
+            "scope": "global",
+            "target_path": str(target),
+            "after": draft["body"],
+            "rationale": draft.get("rationale", ""),
+            "est_token_savings": 0,
+            "phase": draft.get("phase"),
+            "preferred_mcps_missing": draft.get("preferred_mcps_missing", []),
+            "preferred_skills_missing": draft.get("preferred_skills_missing", []),
+            "bytes": draft.get("bytes", len(draft["body"])),
+        })
+    return proposals
+
+
 def propose_security_hook() -> list[dict]:
     settings_path = CLAUDE_DIR / "settings.json"
     security_py = Path(__file__).resolve().parent / "security.py"
@@ -575,6 +601,7 @@ def main(argv: list[str]) -> int:
     p.add_argument("--candidates", default=str(Path(__file__).resolve().parent.parent / "cache" / "candidates.json"))
     p.add_argument("--corrections", default=str(Path(__file__).resolve().parent.parent / "cache" / "corrections.json"))
     p.add_argument("--composition", default=str(Path(__file__).resolve().parent.parent / "cache" / "composition.json"))
+    p.add_argument("--subagents", default=str(Path(__file__).resolve().parent.parent / "cache" / "subagent_drafts.json"))
     p.add_argument("--with-security-hook", action="store_true")
     args = p.parse_args(argv)
 
@@ -590,6 +617,7 @@ def main(argv: list[str]) -> int:
     items += propose_tweaks(Path(args.corrections))
     items += propose_personalizations(Path(args.composition))
     items += propose_compose_summary(Path(args.composition))
+    items += propose_subagents(Path(args.subagents))
     if args.with_security_hook:
         items += propose_security_hook()
 
@@ -610,6 +638,7 @@ def main(argv: list[str]) -> int:
             "tweak_skill": sum(1 for i in items if i["type"] == "tweak-skill"),
             "personalize_skill": sum(1 for i in items if i["type"] == "personalize-skill"),
             "compose_bundle": sum(1 for i in items if i["type"] == "compose-bundle"),
+            "gen_subagent": sum(1 for i in items if i["type"] == "gen-subagent"),
             "add_hook": sum(1 for i in items if i["type"] == "add-hook"),
             "est_total_token_savings": sum(i.get("est_token_savings", 0) for i in items),
         },
