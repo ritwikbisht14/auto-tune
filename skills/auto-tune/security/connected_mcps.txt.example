@@ -1,0 +1,15 @@
+# Copy this file to connected_mcps.txt and list every claude.ai-managed MCP
+# you've authenticated. Auto-tune uses this list to decide which subagents
+# can install (e.g. designer-content needs Atlassian).
+#
+# The auth cache at ~/.claude/mcp-needs-auth-cache.json only tracks MCPs that
+# *need* auth — once authenticated, an MCP disappears from that cache. So this
+# file is the source of truth for "authenticated and ready."
+#
+# One MCP name per line. Lines starting with # are ignored.
+#
+# Common entries (uncomment and authenticate via /mcp inside Claude Code):
+# claude_ai_Atlassian_Rovo
+# claude_ai_Slack
+# claude_ai_Microsoft_365
+# claude_ai_Zoom_for_Claude

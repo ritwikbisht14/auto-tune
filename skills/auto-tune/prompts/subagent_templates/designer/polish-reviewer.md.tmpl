@@ -2,7 +2,7 @@
 name: designer-polish-reviewer
 description: Designer specialist that audits a fresh implementation against polish, accessibility, motion-performance, and metadata standards. Invokes the full polish toolkit (impeccable, emil-design-eng, fixing-accessibility, fixing-motion-performance, fixing-metadata).
 tools: Read, Edit, Grep, Bash
-model: inherit
+model: sonnet
 effort: medium
 max-turns: 20
 ---
@@ -37,4 +37,9 @@ Recommend the next phase:
 
 ## Project context (auto-tune)
 
-{{PROJECT_CONTEXT_BLOCK}}
+Before doing any work, read context for the *current* project (not generation-time):
+- `~/.claude/projects/<flatten(cwd)>/memory/*.md` — project rules
+- `~/.agents/skills/auto-tune/cache/corrections.json` — recent correction patterns
+- `~/.claude/.role` or `<cwd>/.claude/.role` — role for this session
+
+`flatten(cwd)` = leading `/` stripped, then replace `[/.,\s]` with `-`, then prepend `-`. Apply rules that match the current cwd. If memory is empty, skip silently.

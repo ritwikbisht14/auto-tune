@@ -24,6 +24,9 @@ Parse from the user's message:
 - `--discover` — also run the external-skill discovery step (Grok + GitHub + RSS + WebSearch). Implied by `--global`.
 - `--corrections-only` — skip analyze/discover; only detect correction patterns and propose `tweak-skill` items.
 - `--add-security-hook` — include the `add-hook` proposal that installs a `PreToolUse` URL-allowlist check.
+- `--refresh` — also run `refresh.py` to look for higher-quality community alternatives to installed skills. Emits `swap-skill` items. Opt-in; recommended weekly cadence.
+- `--refresh-content` — re-fetch the designer-content Confluence catalog from the folder defined in `config/designer-content.json` and update that config with any newly-discovered pages. Run when new pages are added to your UX copy folder.
+- `--branch-isolate` — append a fenced block to `<project>/.gitignore` so per-project auto-tune writes (`CLAUDE.md`, `settings.local.json`, `agents/`) stay in the user's tree only and don't merge into team branches. Idempotent.
 
 Default invocation = analyze current folder, detect corrections, propose, confirm each change, apply approved subset. No discovery unless `--discover` or `--global`.
 
@@ -97,6 +100,25 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    ```
    Then for each candidate in `corrections.json` whose `skill != "(global)"`, draft a 1–3 line additive constraint per [prompts/tweak_constraint.md](~/.agents/skills/auto-tune/prompts/tweak_constraint.md) and write it back into the file under the candidate's `proposed_edit` key. If the candidate's pattern doesn't yield a clean constraint, set `proposed_edit` to `null` and propose.py will skip it.
 
+6a. **Drift detect** (always — runs on every /auto-tune):
+   ```
+   python3 ~/.agents/skills/auto-tune/scripts/drift.py --cwd <pwd>
+   ```
+   Walks `cache/log.jsonl` for `prune-skill` entries in the last 60 days and counts keyword overlap with user messages since each prune. If a pruned skill's topic keeps appearing, surfaces a `restore-skill` candidate. Silent if no candidates.
+
+6b. **Upgrade detect** (optional — only when `--refresh` is set):
+   ```
+   python3 ~/.agents/skills/auto-tune/scripts/refresh.py --role <role> --cwd <pwd>
+   ```
+   For each facet in the user's role with an installed primary, finds candidates in `cache/candidates.json` that score higher than the installed baseline by ≥0.15. Emits `swap-skill` candidates to `cache/upgrades.json`. Requires `discover.py` to have run first (so candidates are available).
+
+6c. **Confluence catalog refresh** (optional — only when `--refresh-content` is set, and only when role=designer):
+   - Pre-flight: ensure Atlassian MCP is connected. If not, halt with the same auth message as the designer-content pre-flight (step 9).
+   - Read `config/designer-content.json` to get the user's `cloud_id` and `folder_id`. If the file doesn't exist, halt with: *"designer-content is not yet configured. Copy `config/designer-content.json.example` to `config/designer-content.json` and fill in your Confluence cloud_id, folder_id, and page IDs first."*
+   - Run CQL: `parent = <folder_id> AND type = page` in `cloudId <cloud_id>`.
+   - For each result, capture `id`, `title`, and any `summary`/excerpt. Match the title against the user's existing `conditional_pages` entries in the config to decide whether the page is a new one or a known one whose title changed.
+   - Propose updates to `config/designer-content.json` (not the template) as a `tweak-skill`-equivalent item. Once applied, the next `subagents.py` run will regenerate the catalog block in [content.md.tmpl](~/.agents/skills/auto-tune/prompts/subagent_templates/designer/content.md.tmpl) automatically.
+
 6. **Propose** changes:
    ```
    python3 ~/.agents/skills/auto-tune/scripts/propose.py --signals ~/.agents/skills/auto-tune/cache/signals.json --role <role> --cwd <pwd> --out ~/.agents/skills/auto-tune/cache/proposal.json [--with-security-hook]
@@ -115,6 +137,10 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    - `compose-bundle` — read-only summary of the role's composed bundle
    - `gen-subagent` — write a generated subagent to `~/.claude/agents/<name>.md`
    - `add-hook` — security `PreToolUse` URL-allowlist hook in `~/.claude/settings.json`
+   - `swap-skill` (v5) — replace an installed skill with a higher-quality community alternative (requires `--refresh`)
+   - `restore-skill` (v5) — re-enable a previously-pruned skill that the user keeps asking about
+   - `branch-isolate` (v5) — append fenced block to `<project>/.gitignore` (requires `--branch-isolate`)
+   - `manual-find-skill` (v5) — surface a skill gap for the user to find externally; paste the URL back to /auto-tune to wire it in
 
    For each group, render a short summary + per-item rationale + estimated token savings. Keep it scannable; show the full `after` content only on request.
 
@@ -138,6 +164,9 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
 - **Never bypass the security gate.** Every URL that auto-tune itself fetches (discovery, RSS, GitHub API) MUST go through `security.py check-url` first. Every fetched body MUST land in `security/quarantine/` and pass `scan-content` before propose.py exposes it as `add-skill-external`. If the user asks you to fetch a URL outside the allowlist, refuse and explain — they should add the host to `security/allowlist.txt` first.
 - **`tweak-skill` edits are additive-only.** Always append under "## Constraints (auto-tune)"; never modify existing skill text. If a proposed constraint contradicts existing text, drop the candidate and surface it for manual review.
 - **Corrections with `skill == "(global)"` do not become `tweak-skill` proposals.** They are noise unless explicitly attributable; surface them as candidate CLAUDE.md additions for the relevant project folder instead.
+- **MCP detection (v5):** subagents.py and apply.py read `~/.agents/skills/auto-tune/security/connected_mcps.txt` to discover claude.ai-managed MCPs (e.g. `claude_ai_Atlassian_Rovo`). The auth cache at `~/.claude/mcp-needs-auth-cache.json` only lists MCPs that *need* auth — once authenticated, an MCP disappears from that cache, so the connected_mcps.txt file is the source of truth for "authenticated and ready." `MCP_ALIASES` in subagents.py maps the logical name `atlassian` to either `atlassian` (self-hosted) or `claude_ai_Atlassian_Rovo` (claude.ai-managed).
+- **Atlassian onboarding (v5):** designer-content cannot generate without an Atlassian MCP because it reads the user's UX copy guidelines on every invocation. When `gen-subagent:designer-content` is proposed and the user has no Atlassian MCP connected, apply.py refuses with: *"Run /mcp and authenticate Atlassian Rovo (or install a self-hosted atlassian MCP), then add the MCP name to `~/.agents/skills/auto-tune/security/connected_mcps.txt` and re-run /auto-tune."* The orchestrator surfaces this *before* asking for confirmations, so the user fixes it first.
+- **designer-content config:** the specific Confluence cloud_id, folder_id, and page IDs are user-specific and live in `config/designer-content.json` (gitignored). The shipped template in `prompts/subagent_templates/designer/content.md.tmpl` carries only placeholders; `subagents.py` substitutes values from the local config at generation time. If the config file is missing, the rendered subagent body includes a "configure me" notice instead of any specific values — nothing private leaks.
 
 ## Output style
 

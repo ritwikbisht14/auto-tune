@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -266,6 +267,166 @@ def apply_gen_subagent(item: dict, dry_run: bool) -> dict:
     return {"status": "applied", "undo": f"rm {target}"}
 
 
+def _read_connected_mcps() -> set[str]:
+    """Read the user-maintained list of connected claude.ai-managed MCPs."""
+    f = Path(__file__).resolve().parent.parent / "security" / "connected_mcps.txt"
+    out: set[str] = set()
+    if f.is_file():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                out.add(line)
+    return out
+
+
+def _atlassian_mcp_is_connected() -> bool:
+    """True if a local or claude.ai-managed Atlassian MCP is reachable."""
+    home = Path.home()
+    claude_json = home / ".claude.json"
+    if claude_json.is_file():
+        try:
+            data = json.loads(claude_json.read_text(encoding="utf-8"))
+            if "atlassian" in (data.get("mcpServers") or {}):
+                return True
+        except json.JSONDecodeError:
+            pass
+    return "claude_ai_Atlassian_Rovo" in _read_connected_mcps()
+
+
+def _wrap_gen_subagent_with_preflight(item: dict, dry_run: bool) -> dict:
+    """Designer-content needs Atlassian MCP. Halt early with a clear message."""
+    if item.get("id") == "gen-subagent:designer-content" and not _atlassian_mcp_is_connected():
+        return {
+            "status": "skipped",
+            "reason": (
+                "designer-content requires the Atlassian MCP to read your Confluence "
+                "UX copy guidelines. Run /mcp and authenticate Atlassian Rovo (or install "
+                "a self-hosted atlassian MCP), then add the MCP name to "
+                "~/.agents/skills/auto-tune/security/connected_mcps.txt and re-run /auto-tune."
+            ),
+        }
+    return apply_gen_subagent(item, dry_run)
+
+
+def apply_swap_skill(item: dict, dry_run: bool) -> dict:
+    """Swap an installed skill for a higher-quality candidate.
+
+    Removes the old ~/.claude/skills/<old> symlink (source preserved at
+    ~/.agents/skills/<old>/), promotes the new candidate from quarantine into
+    ~/.agents/skills/<new>/, and creates the new symlink.
+    """
+    home = Path.home()
+    old_name = item.get("before", "")
+    new_name = item.get("after", "")
+    if not old_name or not new_name:
+        return {"status": "skipped", "reason": "swap-skill item missing before/after names"}
+    old_link = home / ".claude" / "skills" / old_name
+    new_link = home / ".claude" / "skills" / new_name
+    candidate_meta = item.get("candidate", {})
+    cand_url = candidate_meta.get("source_url", "")
+    quarantine_root = Path(__file__).resolve().parent.parent / "security" / "quarantine"
+    # Try to locate the quarantined source by name match (apply assumes discover.py
+    # already staged it). We do not auto-fetch here.
+    quarantined = None
+    if quarantine_root.is_dir():
+        for sub in quarantine_root.iterdir():
+            if sub.is_dir() and (sub.name == new_name or new_name in sub.name):
+                quarantined = sub
+                break
+    if quarantined is None:
+        return {
+            "status": "skipped",
+            "reason": (
+                f"swap-skill candidate '{new_name}' not found in quarantine. "
+                f"Re-run /auto-tune --discover so {cand_url} is quarantine-scanned, then retry."
+            ),
+        }
+    target_source = home / ".agents" / "skills" / new_name
+    if dry_run:
+        return {
+            "status": "dry-run",
+            "would": (
+                f"unlink {old_link}; move {quarantined} -> {target_source}; "
+                f"ln -s {target_source} {new_link}"
+            ),
+        }
+    # Backup the old symlink (save its target path for undo).
+    old_target = ""
+    if old_link.is_symlink():
+        old_target = str(old_link.readlink())
+        old_link.unlink()
+    elif old_link.exists():
+        return {"status": "skipped", "reason": f"{old_link} exists but isn't a symlink; refuse to touch"}
+    target_source.parent.mkdir(parents=True, exist_ok=True)
+    if target_source.exists():
+        return {"status": "skipped", "reason": f"{target_source} already exists; refusing to overwrite"}
+    shutil.move(str(quarantined), str(target_source))
+    new_link.symlink_to(target_source)
+    return {
+        "status": "applied",
+        "undo": (
+            f"rm {new_link}; mv {target_source} {quarantined}; "
+            + (f"ln -s {old_target} {old_link}" if old_target else f"# old symlink {old_link} did not exist")
+        ),
+    }
+
+
+def apply_restore_skill(item: dict, dry_run: bool) -> dict:
+    """Recreate a previously-pruned skill symlink. Source must still exist."""
+    home = Path.home()
+    skill_id = item.get("id", "")
+    name = skill_id.split(":", 1)[1] if ":" in skill_id else ""
+    if not name:
+        return {"status": "skipped", "reason": "restore-skill item missing skill name in id"}
+    link = home / ".claude" / "skills" / name
+    source = home / ".agents" / "skills" / name
+    if not source.is_dir():
+        return {"status": "skipped", "reason": f"source {source} not found; cannot restore"}
+    if link.exists() or link.is_symlink():
+        return {"status": "skipped", "reason": f"{link} already exists; skill is already enabled"}
+    if dry_run:
+        return {"status": "dry-run", "would": f"ln -s {source} {link}"}
+    link.symlink_to(source)
+    return {"status": "applied", "undo": f"rm {link}"}
+
+
+def apply_branch_isolate(item: dict, dry_run: bool) -> dict:
+    """Append a fenced .gitignore block. Idempotent."""
+    gitignore = Path(item["target_path"])
+    fenced_block = (
+        "\n# auto-tune: begin (personal Claude Code config; do not commit)\n"
+        ".claude/CLAUDE.md\n"
+        ".claude/settings.local.json\n"
+        ".claude/agents/\n"
+        "# auto-tune: end\n"
+    )
+    if gitignore.is_file():
+        existing = gitignore.read_text(encoding="utf-8", errors="ignore")
+        if "# auto-tune: begin" in existing:
+            return {"status": "skipped", "reason": "fenced block already present"}
+        if dry_run:
+            return {"status": "dry-run", "would": f"append {len(fenced_block)} bytes to {gitignore}"}
+        new = existing.rstrip() + "\n" + fenced_block
+        gitignore.write_text(new, encoding="utf-8")
+    else:
+        if dry_run:
+            return {"status": "dry-run", "would": f"create {gitignore} with fenced block"}
+        gitignore.parent.mkdir(parents=True, exist_ok=True)
+        gitignore.write_text(fenced_block.lstrip("\n"), encoding="utf-8")
+    return {
+        "status": "applied",
+        "undo": f"edit {gitignore} and remove the lines between '# auto-tune: begin' and '# auto-tune: end'",
+    }
+
+
+def apply_manual_find_skill(item: dict, dry_run: bool) -> dict:
+    """No-op: user must find the skill themselves. We just surface the prompt."""
+    return {
+        "status": "manual",
+        "reason": item.get("rationale", "user finds and installs this skill externally"),
+    }
+
+
 HANDLERS = {
     "prune-skill": apply_prune_skill,
     "prune-mcp": apply_prune_mcp,
@@ -277,8 +438,12 @@ HANDLERS = {
     "tweak-skill": apply_tweak_skill,
     "personalize-skill": apply_personalize_skill,
     "compose-bundle": apply_compose_bundle,
-    "gen-subagent": apply_gen_subagent,
+    "gen-subagent": _wrap_gen_subagent_with_preflight,
     "add-hook": apply_add_hook,
+    "swap-skill": apply_swap_skill,
+    "restore-skill": apply_restore_skill,
+    "branch-isolate": apply_branch_isolate,
+    "manual-find-skill": apply_manual_find_skill,
 }
 
 

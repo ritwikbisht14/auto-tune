@@ -40,32 +40,51 @@ CHAINS: dict[str, list[dict]] = {
     "designer": [
         {"name": "designer-fullstack", "template": "fullstack.md.tmpl", "phase": "orchestrator",
          "preferred_mcps": [], "preferred_skills": [],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}"]},
+         "placeholders": []},
+        {"name": "designer-ideation", "template": "ideation.md.tmpl", "phase": "ideation",
+         "preferred_mcps": [],
+         "preferred_skills": [],
+         "placeholders": ["{{CONNECTED_DATA_SOURCES}}"]},
         {"name": "designer-researcher", "template": "researcher.md.tmpl", "phase": "research",
          "preferred_mcps": ["atlassian", "chrome-devtools", "figma-dev"],
          "preferred_skills": [],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}", "{{CONNECTED_DATA_SOURCES}}"]},
+         "placeholders": ["{{CONNECTED_DATA_SOURCES}}"]},
+        {"name": "designer-content", "template": "content.md.tmpl", "phase": "callable-anywhere",
+         "preferred_mcps": ["atlassian"],
+         "preferred_skills": [],
+         "placeholders": [],
+         "requires_mcp": "atlassian"},
         {"name": "designer-spec-writer", "template": "spec-writer.md.tmpl", "phase": "spec",
          "preferred_mcps": ["atlassian"],
          "preferred_skills": ["impeccable", "emil-design-eng"],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}", "{{SPEC_WRITER_SKILLS}}"]},
+         "placeholders": ["{{SPEC_WRITER_SKILLS}}"]},
         {"name": "designer-implementer", "template": "implementer.md.tmpl", "phase": "implementation",
          "preferred_mcps": ["chrome-devtools", "figma-dev"],
          "preferred_skills": ["baseline-ui", "vercel-react-best-practices"],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}", "{{IMPLEMENTER_SKILLS}}"]},
+         "placeholders": ["{{IMPLEMENTER_SKILLS}}"]},
         {"name": "designer-polish-reviewer", "template": "polish-reviewer.md.tmpl", "phase": "polish",
          "preferred_mcps": ["chrome-devtools"],
          "preferred_skills": ["impeccable", "emil-design-eng", "fixing-accessibility",
                               "fixing-motion-performance", "fixing-metadata"],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}", "{{REVIEWER_SKILLS}}"]},
+         "placeholders": ["{{REVIEWER_SKILLS}}"]},
         {"name": "designer-handoff", "template": "handoff.md.tmpl", "phase": "handoff",
          "preferred_mcps": ["atlassian"],
          "preferred_skills": [],
-         "placeholders": ["{{PROJECT_CONTEXT_BLOCK}}", "{{CONNECTED_DATA_SOURCES}}"]},
+         "placeholders": ["{{CONNECTED_DATA_SOURCES}}"]},
     ],
-    # v5 — placeholders only
+    # v6 — placeholders only
     "pm": [],
     "engineer": [],
+}
+
+# claude.ai-managed MCPs that satisfy a "logical" MCP name (e.g. "atlassian").
+# Subagents declare preferred_mcps in human terms; this map lets subagents.py
+# detect that a claude.ai-managed equivalent is connected and counts as "atlassian".
+MCP_ALIASES = {
+    "atlassian": ["atlassian", "claude_ai_Atlassian_Rovo"],
+    "slack": ["slack", "claude_ai_Slack"],
+    "microsoft-365": ["microsoft-365", "claude_ai_Microsoft_365"],
+    "zoom": ["zoom", "claude_ai_Zoom_for_Claude"],
 }
 
 MCP_DESCRIPTIONS = {
@@ -97,87 +116,48 @@ def installed_skills() -> list[str]:
     return sorted(out)
 
 
+CONNECTED_MCPS_FILE = SKILL_ROOT / "security" / "connected_mcps.txt"
+
+
 def installed_mcps() -> list[str]:
-    if not CLAUDE_JSON.is_file():
-        return []
-    try:
-        data = json.loads(CLAUDE_JSON.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    return sorted((data.get("mcpServers") or {}).keys())
+    """Return the list of MCPs the user has access to.
 
+    Sources, merged:
+      - ~/.claude.json mcpServers (self-installed local MCPs)
+      - ~/.agents/skills/auto-tune/security/connected_mcps.txt (claude.ai-managed
+        MCPs the user has confirmed authenticated — the auth cache only tracks
+        unauthenticated MCPs, so we need an explicit list for connected ones)
 
-def read_memory_rules(cwd: str) -> list[dict]:
-    flat = flatten_cwd(cwd)
-    mem_dir = PROJECTS_DIR / flat / "memory"
-    out: list[dict] = []
-    if not mem_dir.is_dir():
-        return out
-    for md in sorted(mem_dir.glob("*.md")):
-        if md.name == "MEMORY.md":
-            continue
+    Names returned are the *raw* MCP names (e.g. 'claude_ai_Atlassian_Rovo',
+    'chrome-devtools'); callers use MCP_ALIASES to map logical names
+    ('atlassian') to whatever is actually connected.
+    """
+    out: set[str] = set()
+    if CLAUDE_JSON.is_file():
         try:
-            text = md.read_text(encoding="utf-8", errors="ignore")
+            data = json.loads(CLAUDE_JSON.read_text(encoding="utf-8"))
+            out.update((data.get("mcpServers") or {}).keys())
+        except json.JSONDecodeError:
+            pass
+    if CONNECTED_MCPS_FILE.is_file():
+        try:
+            for line in CONNECTED_MCPS_FILE.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    out.add(line)
         except OSError:
-            continue
-        name_m = re.search(r"^name:\s*(.+)$", text, re.MULTILINE)
-        desc_m = re.search(r"^description:\s*(.+)$", text, re.MULTILINE)
-        if name_m:
-            out.append({
-                "name": name_m.group(1).strip(),
-                "description": desc_m.group(1).strip() if desc_m else "",
-            })
-    return out
+            pass
+    return sorted(out)
 
 
-def read_correction_snippets() -> list[str]:
-    p = CACHE_DIR / "corrections.json"
-    if not p.is_file():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
-    out: list[str] = []
-    for cand in data.get("candidates", []):
-        if cand.get("count", 0) >= 3:
-            snips = cand.get("sample_snippets", [])
-            if snips:
-                out.append(snips[0][:140])
-    return out[:5]
-
-
-def build_project_context_block(role: str, cwd: str) -> str:
-    lines: list[str] = [
-        "This section is auto-managed by auto-tune; the template above stays untouched.",
-        "",
-    ]
-    mem = read_memory_rules(cwd)
-    if mem:
-        lines.append("Project rules from memory:")
-        for r in mem[:5]:
-            lines.append(f"- **{r['name']}** — {r['description']}")
-    corr = read_correction_snippets()
-    if corr:
-        if mem:
-            lines.append("")
-        lines.append("Repeating user-correction patterns to avoid:")
-        for c in corr[:3]:
-            lines.append(f"- \"{c}\"")
-    role_hint = {
-        "designer": "Reader works as a product designer. Bias outputs toward visual fidelity, component reuse, and accessibility over framework gymnastics.",
-        "pm": "Reader works as a product manager. Bias toward decisions and stakeholder framing; keep code edits minimal.",
-        "engineer": "Reader works as an engineer. Bias toward small diffs, test coverage, and root-cause explanations.",
-    }.get(role)
-    if role_hint:
-        if mem or corr:
-            lines.append("")
-        lines.append(role_hint)
-    return "\n".join(lines)
+def mcp_is_connected(logical_name: str, available: list[str]) -> bool:
+    """True if any alias for logical_name appears in available."""
+    aliases = MCP_ALIASES.get(logical_name, [logical_name])
+    return any(a in available for a in aliases)
 
 
 def build_connected_data_sources(preferred_mcps: list[str], available_mcps: list[str]) -> str:
-    enabled = [m for m in preferred_mcps if m in available_mcps]
+    enabled = [m for m in preferred_mcps if mcp_is_connected(m, available_mcps)]
     if not enabled:
         return "- (none of this subagent's preferred MCPs are currently installed; rely on manual-paste data sources below or ask the user to install one)"
     return "\n".join(f"- {MCP_DESCRIPTIONS.get(m, m)}" for m in enabled)
@@ -190,8 +170,60 @@ def build_skill_invocation_list(preferred_skills: list[str], installed: list[str
     return "\n".join(f"- `{s}`" for s in available)
 
 
-def fill_template(role: str, spec: dict, available_skills: list[str], available_mcps: list[str],
-                  ctx_block: str) -> str | None:
+CONFIG_DIR = SKILL_ROOT / "config"
+
+
+def _designer_content_config() -> dict | None:
+    """Load the user's designer-content Confluence config (gitignored)."""
+    p = CONFIG_DIR / "designer-content.json"
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _designer_content_unconfigured_block() -> str:
+    """Markdown that explains the user how to configure designer-content."""
+    example = CONFIG_DIR / "designer-content.json.example"
+    return (
+        "> **⚠️ designer-content is not yet configured for this user.**\n"
+        ">\n"
+        f"> Copy [`config/designer-content.json.example`]({example}) to `config/designer-content.json`,\n"
+        "> fill in your company's Confluence `cloud_id`, `folder_id`, and the page IDs of your UX copy\n"
+        "> guidelines, then re-run `/auto-tune`. Until that's done this subagent will operate on its own\n"
+        "> design judgment without your company's voice/tone references.\n"
+    )
+
+
+def _build_page_catalog(cfg: dict) -> str:
+    """Render the Markdown page-catalog table from the JSON config."""
+    lines = ["| Page ID | Title | Load when |", "|---|---|---|"]
+    for p in cfg.get("always_load_pages", []):
+        lines.append(f"| **{p['id']}** | **{p['title']}** | **Always (baseline)** |")
+    for p in cfg.get("conditional_pages", []):
+        lines.append(f"| {p['id']} | {p['title']} | {p.get('load_when', '—')} |")
+    return "\n".join(lines)
+
+
+def _apply_designer_content_placeholders(body: str) -> str:
+    """Substitute Confluence placeholders in content.md.tmpl using the config file."""
+    cfg = _designer_content_config()
+    if cfg is None:
+        # Replace placeholders with a clear "configure me" notice.
+        notice = _designer_content_unconfigured_block()
+        body = body.replace("{{CONFLUENCE_CLOUD_ID}}", "<not-configured>")
+        body = body.replace("{{UX_COPY_FOLDER_ID}}", "<not-configured>")
+        body = body.replace("{{PAGE_CATALOG}}", notice)
+        return body
+    body = body.replace("{{CONFLUENCE_CLOUD_ID}}", cfg.get("cloud_id", ""))
+    body = body.replace("{{UX_COPY_FOLDER_ID}}", str(cfg.get("folder_id", "")))
+    body = body.replace("{{PAGE_CATALOG}}", _build_page_catalog(cfg))
+    return body
+
+
+def fill_template(role: str, spec: dict, available_skills: list[str], available_mcps: list[str]) -> str | None:
     tmpl_path = TEMPLATES_DIR / role / spec["template"]
     if not tmpl_path.is_file():
         return None
@@ -199,11 +231,12 @@ def fill_template(role: str, spec: dict, available_skills: list[str], available_
     connected = build_connected_data_sources(spec.get("preferred_mcps", []), available_mcps)
     skills_list = build_skill_invocation_list(spec.get("preferred_skills", []), available_skills)
     body = body.replace("{{ROLE}}", role)
-    body = body.replace("{{PROJECT_CONTEXT_BLOCK}}", ctx_block)
     body = body.replace("{{CONNECTED_DATA_SOURCES}}", connected)
     body = body.replace("{{SPEC_WRITER_SKILLS}}", skills_list)
     body = body.replace("{{IMPLEMENTER_SKILLS}}", skills_list)
     body = body.replace("{{REVIEWER_SKILLS}}", skills_list)
+    if spec.get("name") == "designer-content":
+        body = _apply_designer_content_placeholders(body)
     return body
 
 
@@ -223,16 +256,15 @@ def main(argv: list[str]) -> int:
 
     skills = installed_skills()
     mcps = installed_mcps()
-    ctx_block = build_project_context_block(args.role, args.cwd)
 
     drafts: list[dict] = []
     for spec in chain:
-        body = fill_template(args.role, spec, skills, mcps, ctx_block)
+        body = fill_template(args.role, spec, skills, mcps)
         if body is None:
             continue
         target_path = CLAUDE_AGENTS / f"{spec['name']}.md"
-        connected = [m for m in spec.get("preferred_mcps", []) if m in mcps]
-        missing_mcps = [m for m in spec.get("preferred_mcps", []) if m not in mcps]
+        connected = [m for m in spec.get("preferred_mcps", []) if mcp_is_connected(m, mcps)]
+        missing_mcps = [m for m in spec.get("preferred_mcps", []) if not mcp_is_connected(m, mcps)]
         usable_skills = [s for s in spec.get("preferred_skills", []) if s in skills]
         missing_skills = [s for s in spec.get("preferred_skills", []) if s not in skills]
         rationale_parts = [f"phase: {spec['phase']}"]
@@ -242,6 +274,10 @@ def main(argv: list[str]) -> int:
             rationale_parts.append(f"skills referenced: {','.join(usable_skills)}")
         if missing_skills:
             rationale_parts.append(f"missing skills: {','.join(missing_skills)}")
+        requires_mcp = spec.get("requires_mcp")
+        blocked_reason = None
+        if requires_mcp and not mcp_is_connected(requires_mcp, mcps):
+            blocked_reason = f"requires {requires_mcp} MCP — not connected. Run /mcp and authenticate before installing this subagent."
         drafts.append({
             "name": spec["name"],
             "target_path": str(target_path),
@@ -253,6 +289,7 @@ def main(argv: list[str]) -> int:
             "preferred_mcps_missing": missing_mcps,
             "preferred_skills_available": usable_skills,
             "preferred_skills_missing": missing_skills,
+            "blocked_reason": blocked_reason,
         })
 
     total_bytes = sum(d["bytes"] for d in drafts)

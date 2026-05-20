@@ -2,7 +2,7 @@
 name: designer-handoff
 description: Designer specialist for the dev-handoff phase — assemble the final spec, prepare assets, write release notes, draft the PR description or Confluence page.
 tools: Read, Write, Edit, Bash
-model: inherit
+model: sonnet
 effort: medium
 max-turns: 15
 ---
@@ -33,4 +33,9 @@ This is the end of the chain. Output a one-line summary plus the list of final a
 
 ## Project context (auto-tune)
 
-{{PROJECT_CONTEXT_BLOCK}}
+Before doing any work, read context for the *current* project (not generation-time):
+- `~/.claude/projects/<flatten(cwd)>/memory/*.md` — project rules
+- `~/.agents/skills/auto-tune/cache/corrections.json` — recent correction patterns
+- `~/.claude/.role` or `<cwd>/.claude/.role` — role for this session
+
+`flatten(cwd)` = leading `/` stripped, then replace `[/.,\s]` with `-`, then prepend `-`. Apply rules that match the current cwd. If memory is empty, skip silently.

@@ -30,6 +30,7 @@ SECURITY_DIR = SKILL_ROOT / "security"
 TRUSTED_AUTHORS = SECURITY_DIR / "trusted_authors.txt"
 TRUSTED_REPOS = SECURITY_DIR / "trusted_repos.txt"
 CURATORS = SECURITY_DIR / "curators.txt"
+CURATORS_SYNCED = SECURITY_DIR / "curators_synced.txt"
 
 HEADER = (
     "# auto-tune trusted-authors list (auto-maintained by trusted.py)\n"
@@ -150,15 +151,21 @@ def sync() -> dict:
             preserved_repos = repos_header.rstrip().splitlines()
     write_with_auto_block(TRUSTED_REPOS, repos_header, preserved_repos, sorted(repos))
 
-    # curators.txt — append releases.atom feed for each trusted repo (preserve user edits)
-    prev_curators = CURATORS.read_text(encoding="utf-8") if CURATORS.is_file() else ""
-    preserved_cur, _ = split_auto_block(prev_curators)
-    if not preserved_cur:
-        preserved_cur = prev_curators.splitlines() if prev_curators else []
+    # curators_synced.txt — user-derived feeds go in a separate file so they
+    # never leak into the public repo. The static seed list stays in
+    # curators.txt (committed) and is left untouched here.
     auto_feeds = sorted({
         f"https://github.com/{repo}/releases.atom" for repo in repos
     })
-    write_with_auto_block(CURATORS, "", preserved_cur, auto_feeds)
+    synced_header = (
+        "# Auto-synced from your installed skills (regenerated each /auto-tune run).\n"
+        "# This file is gitignored — your installed-author list never leaves your machine.\n"
+        "# Edit curators.txt directly to add static feeds you want versioned.\n"
+    )
+    CURATORS_SYNCED.write_text(
+        synced_header + "\n" + ("\n".join(auto_feeds) + "\n" if auto_feeds else ""),
+        encoding="utf-8",
+    )
 
     return {
         "authors_synced": sorted(authors),
@@ -167,6 +174,7 @@ def sync() -> dict:
         "trusted_authors_path": str(TRUSTED_AUTHORS),
         "trusted_repos_path": str(TRUSTED_REPOS),
         "curators_path": str(CURATORS),
+        "curators_synced_path": str(CURATORS_SYNCED),
     }
 
 

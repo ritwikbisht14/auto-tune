@@ -1,12 +1,12 @@
 # auto-tune curator feeds for skill/agent discovery
 # One URL per line; must point to RSS/Atom feed or GitHub releases.atom
 # All URLs are subject to the allowlist before fetch.
+#
+# This file is committed. User-derived auto-synced feeds live in
+# curators_synced.txt (gitignored) and are regenerated per-user by
+# `python3 scripts/trusted.py sync`.
 
 https://github.com/anthropics/skills/releases.atom
 https://github.com/vercel-labs/skills/releases.atom
 https://github.com/vercel-labs/agent-skills/releases.atom
 https://github.com/ibelick/ui-skills/releases.atom
-
-# auto: begin synced entries
-# (auto-managed by scripts/trusted.py — populated from your own skill-lock.json after install)
-# auto: end synced entries

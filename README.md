@@ -2,7 +2,7 @@
 
 A Claude Code skill that **auto-customizes your setup** — prunes unused skills/MCPs, generates per-folder `CLAUDE.md`, discovers role-relevant community skills, composes them into a coherent multi-facet bundle, and personalizes each skill with project-specific context drawn from your transcripts and memory.
 
-Built by [Ritwik Bisht](https://github.com/ritwik-bisht) iteratively with Claude Code. The goal: shrink the per-turn system-prompt tax (fewer enabled skills + tighter `CLAUDE.md` + role-specific personalization) without losing capability.
+Built by [Ritwik Bisht](https://github.com/ritwikbisht14) iteratively with Claude Code. The goal: shrink the per-turn system-prompt tax (fewer enabled skills + tighter `CLAUDE.md` + role-specific personalization) without losing capability.
 
 ## What it does
 
@@ -25,7 +25,7 @@ Built by [Ritwik Bisht](https://github.com/ritwik-bisht) iteratively with Claude
 ## Install
 
 ```bash
-git clone https://github.com/ritwik-bisht/auto-tune.git ~/.agents/skills/auto-tune-src
+git clone https://github.com/ritwikbisht14/auto-tune.git ~/.agents/skills/auto-tune-src
 ln -s ~/.agents/skills/auto-tune-src/skills/auto-tune ~/.agents/skills/auto-tune
 ln -s ~/.agents/skills/auto-tune ~/.claude/skills/auto-tune
 ```
@@ -34,9 +34,9 @@ Then add an entry to `~/.agents/.skill-lock.json` so Claude Code lists it as ava
 
 ```json
 "auto-tune": {
-  "source": "ritwik-bisht/auto-tune",
+  "source": "ritwikbisht14/auto-tune",
   "sourceType": "github",
-  "sourceUrl": "https://github.com/ritwik-bisht/auto-tune.git",
+  "sourceUrl": "https://github.com/ritwikbisht14/auto-tune.git",
   "skillPath": "skills/auto-tune/SKILL.md",
   "installedAt": "2026-05-19T00:00:00.000Z",
   "updatedAt": "2026-05-19T00:00:00.000Z"
@@ -44,6 +44,26 @@ Then add an entry to `~/.agents/.skill-lock.json` so Claude Code lists it as ava
 ```
 
 Restart your Claude Code session after editing skill-lock.json so the new skill is picked up. (`find-skills` should also work once this repo is publicly indexed.)
+
+## First-run setup (designer role only)
+
+If you'll use the **designer-content** subagent (UX writing / microcopy), give it your company's Confluence references **once** — it lives in a local config file that's gitignored, so your private IDs never leak:
+
+```bash
+cp ~/.agents/skills/auto-tune/config/designer-content.json.example \
+   ~/.agents/skills/auto-tune/config/designer-content.json
+$EDITOR ~/.agents/skills/auto-tune/config/designer-content.json
+```
+
+In that file, set:
+- `cloud_id` — the hostname of your Confluence site (e.g. `your-org.atlassian.net`)
+- `folder_id` — the numeric ID from your UX-copy folder URL (look for `/folder/<NUMBER>` in Confluence)
+- `always_load_pages` — page IDs the subagent loads on every invocation (typically Voice + Accessibility)
+- `conditional_pages` — page IDs loaded only when the task matches the `load_when` description
+
+The Atlassian MCP must be authenticated separately (run `/mcp` in Claude Code and authenticate "Atlassian Rovo", or install a self-hosted MCP). After authenticating, add the MCP name (e.g. `claude_ai_Atlassian_Rovo`) to `~/.agents/skills/auto-tune/security/connected_mcps.txt` — also gitignored.
+
+If you don't fill in this config, `designer-content` still generates but ships a "configure me" notice in its body and operates on generic UX judgment instead of your company's voice/tone references. Everything else (researcher, spec-writer, implementer, polish-reviewer, handoff) works without any setup.
 
 ## Use
 
@@ -63,6 +83,9 @@ The orchestrator (Claude reading `SKILL.md`) runs the pipeline: analyze → disc
 - `--discover` — include the community-discovery step.
 - `--corrections-only` — skip analyze/discover; only detect tweak candidates.
 - `--add-security-hook` — propose a `PreToolUse` URL-allowlist hook that extends gating to all Claude Code internet fetches.
+- `--refresh` — also look for higher-quality community alternatives to your installed skills. Emits `swap-skill` items.
+- `--refresh-content` — re-fetch the designer-content Confluence catalog from the folder defined in your `config/designer-content.json`. Run when new pages are added.
+- `--branch-isolate` — append a fenced block to `<project>/.gitignore` so per-project auto-tune writes (CLAUDE.md, settings.local.json, agents/) stay in your tree only and don't merge into team branches. Idempotent.
 
 ### Roles
 

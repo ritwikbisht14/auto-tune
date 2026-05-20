@@ -37,6 +37,7 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = SKILL_ROOT / "cache"
 SECURITY_DIR = SKILL_ROOT / "security"
 CURATORS_PATH = SECURITY_DIR / "curators.txt"
+CURATORS_SYNCED_PATH = SECURITY_DIR / "curators_synced.txt"
 TRUSTED_AUTHORS_PATH = SECURITY_DIR / "trusted_authors.txt"
 TRUSTED_REPOS_PATH = SECURITY_DIR / "trusted_repos.txt"
 WHITELISTED_AUTHORS_PATH = SECURITY_DIR / "whitelisted_authors.txt"
@@ -373,13 +374,19 @@ def github_search(role: str, security_mod, limit: int = 8) -> list[dict]:
 
 
 def rss_search(role: str, security_mod, limit_per_feed: int = 5) -> list[dict]:
-    if not CURATORS_PATH.is_file():
+    feeds: list[str] = []
+    for path in (CURATORS_PATH, CURATORS_SYNCED_PATH):
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                feeds.append(line)
+    # Dedupe while preserving order (static seeds first, user-synced second).
+    seen: set[str] = set()
+    feeds = [f for f in feeds if not (f in seen or seen.add(f))]
+    if not feeds:
         return []
-    feeds = [
-        line.strip()
-        for line in CURATORS_PATH.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
     results: list[dict] = []
     for url in feeds:
         gate = security_mod.check_url(url)

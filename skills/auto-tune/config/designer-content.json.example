@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy this file to designer-content.json and fill in your company's Confluence values. The .json file is gitignored so your private references never get committed.",
+  "_how_to_find_ids": "Open your UX copy guidelines folder in Confluence. The URL looks like https://<your-org>.atlassian.net/wiki/spaces/<SPACE>/folder/<FOLDER_ID>. cloud_id is '<your-org>.atlassian.net', folder_id is the number after /folder/. To get page IDs, open each page; the URL ends in /pages/<PAGE_ID>/<title>.",
+
+  "cloud_id": "your-org.atlassian.net",
+  "folder_id": "0000000000",
+  "folder_label": "Your company's UX copy guidelines folder",
+
+  "always_load_pages": [
+    {"id": "0000000001", "title": "Voice and tone principles"},
+    {"id": "0000000002", "title": "Accessibility and inclusive language"}
+  ],
+
+  "conditional_pages": [
+    {"id": "0000000003", "title": "Button and link copy standards", "load_when": "Task involves buttons, links, CTAs, action labels"},
+    {"id": "0000000004", "title": "Error, warning, and notification frameworks", "load_when": "Task involves error messages, toasts, banners, warnings"},
+    {"id": "0000000005", "title": "System states and empty states", "load_when": "Task involves empty states, loading messages, idle copy, placeholders"}
+  ]
+}

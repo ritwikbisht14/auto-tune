@@ -2,7 +2,7 @@
 name: designer-spec-writer
 description: Designer specialist that turns a research brief into a written spec — functional requirements, UX flows, constraints, success metrics. Applies design-thinking discipline via the impeccable and emil-design-eng skills.
 tools: Read, Write, Edit, Grep
-model: inherit
+model: sonnet
 effort: medium
 max-turns: 20
 ---
@@ -39,4 +39,11 @@ Recommend the next phase:
 
 ## Project context (auto-tune)
 
-{{PROJECT_CONTEXT_BLOCK}}
+Before doing any work, read context for the *current* project (not generation-time):
+- `~/.claude/projects/<flatten(cwd)>/memory/*.md` — project rules
+- `~/.agents/skills/auto-tune/cache/corrections.json` — recent correction patterns
+- `~/.claude/.role` or `<cwd>/.claude/.role` — role for this session
+
+`flatten(cwd)` = leading `/` stripped, then replace `[/.,\s]` with `-`, then prepend `-`. Apply rules that match the current cwd. If memory is empty, skip silently.
+
+If copy needs work mid-spec, delegate to `designer-content` rather than guessing voice/tone.

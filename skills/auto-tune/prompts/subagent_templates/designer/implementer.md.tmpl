@@ -2,7 +2,7 @@
 name: designer-implementer
 description: Designer specialist for turning a spec into actual UI code or wireframes — components, design-token usage, layout, state handling. Invokes baseline-ui for design-system enforcement.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: inherit
+model: sonnet
 effort: medium
 max-turns: 30
 ---
@@ -33,4 +33,11 @@ Always hand off to `designer-polish-reviewer` after implementation. Do not ship 
 
 ## Project context (auto-tune)
 
-{{PROJECT_CONTEXT_BLOCK}}
+Before doing any work, read context for the *current* project (not generation-time):
+- `~/.claude/projects/<flatten(cwd)>/memory/*.md` — project rules
+- `~/.agents/skills/auto-tune/cache/corrections.json` — recent correction patterns
+- `~/.claude/.role` or `<cwd>/.claude/.role` — role for this session
+
+`flatten(cwd)` = leading `/` stripped, then replace `[/.,\s]` with `-`, then prepend `-`. Apply rules that match the current cwd. If memory is empty, skip silently.
+
+If button labels / errors / empty-state copy come up during build, delegate to `designer-content` rather than improvising.

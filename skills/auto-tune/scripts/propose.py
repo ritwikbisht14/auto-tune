@@ -558,6 +558,160 @@ def propose_subagents(drafts_path: Path) -> list[dict]:
     return proposals
 
 
+def propose_upgrades(upgrades_path: Path) -> list[dict]:
+    if not upgrades_path.is_file():
+        return []
+    try:
+        data = json.loads(upgrades_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    items: list[dict] = []
+    for u in data.get("upgrades", []):
+        cand = u.get("candidate") or {}
+        installed = u.get("installed", "")
+        cand_name = cand.get("name", "")
+        if not installed or not cand_name:
+            continue
+        items.append({
+            "id": f"swap-skill:{installed}:{slugify(cand_name)}",
+            "type": "swap-skill",
+            "scope": "global",
+            "target_path": str(HOME / ".claude" / "skills" / installed),
+            "before": installed,
+            "after": cand_name,
+            "rationale": (
+                f"Better candidate found in facet '{u.get('facet')}': "
+                f"{cand_name} scored {cand.get('quality_score', 0):.2f}, "
+                f"delta {u.get('score_delta', 0):+.2f} over installed baseline. "
+                f"Source: {cand.get('source_url', '?')}"
+            ),
+            "est_token_savings": 0,
+            "facet": u.get("facet"),
+            "source_url": cand.get("source_url"),
+            "candidate": cand,
+        })
+    return items
+
+
+def propose_restores(drift_path: Path) -> list[dict]:
+    if not drift_path.is_file():
+        return []
+    try:
+        data = json.loads(drift_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    items: list[dict] = []
+    for c in data.get("candidates", []):
+        name = c.get("pruned_name", "")
+        if not name:
+            continue
+        if not c.get("source_exists", False):
+            # Source was actually deleted — can't restore. Skip.
+            continue
+        snippets = c.get("evidence_snippets", [])
+        evidence_preview = "; ".join(s[:80] for s in snippets[:2])
+        items.append({
+            "id": f"restore-skill:{name}",
+            "type": "restore-skill",
+            "scope": "global",
+            "target_path": str(HOME / ".claude" / "skills" / name),
+            "before": "(symlink missing)",
+            "after": f"symlink → {HOME / '.agents' / 'skills' / name}",
+            "rationale": (
+                f"You mentioned topics this skill covers {c.get('occurrence_count', 0)} times "
+                f"since it was pruned on {c.get('pruned_at', '?')}. "
+                f"Matched keywords: {', '.join(c.get('keywords_matched', [])[:5])}. "
+                f"Evidence: \"{evidence_preview}\""
+            ),
+            "est_token_savings": 0,
+            "pruned_at": c.get("pruned_at"),
+            "occurrence_count": c.get("occurrence_count"),
+        })
+    return items
+
+
+def propose_branch_isolate(cwd: str, enabled: bool, will_write_project_files: bool) -> list[dict]:
+    """Emit a branch-isolate item when the user opted in AND we'll be writing project files."""
+    if not enabled or not will_write_project_files:
+        return []
+    project = Path(cwd)
+    if not (project / ".git").exists():
+        return []  # Not a git repo; nothing to ignore.
+    gitignore = project / ".gitignore"
+    fenced_block = (
+        "\n# auto-tune: begin (personal Claude Code config; do not commit)\n"
+        ".claude/CLAUDE.md\n"
+        ".claude/settings.local.json\n"
+        ".claude/agents/\n"
+        "# auto-tune: end\n"
+    )
+    existing = ""
+    if gitignore.is_file():
+        existing = gitignore.read_text(encoding="utf-8", errors="ignore")
+        if "# auto-tune: begin" in existing:
+            return []  # Already isolated, idempotent.
+    return [{
+        "id": "branch-isolate:gitignore",
+        "type": "branch-isolate",
+        "scope": "project",
+        "target_path": str(gitignore),
+        "before": "(no fenced block)",
+        "after": fenced_block.strip(),
+        "rationale": (
+            "Appends a fenced block to .gitignore so per-project auto-tune writes "
+            "(CLAUDE.md, settings.local.json, agents/) stay in your tree only and "
+            "don't merge into the team branch."
+        ),
+        "est_token_savings": 0,
+    }]
+
+
+def propose_missing_skill_gaps(role: str, drafts_path: Path) -> list[dict]:
+    """Surface external skills the user needs to find for the subagent chain.
+
+    For role=designer the subagent chain references specific skill names; if any
+    are missing from the user's installed set, emit a `manual-find-skill` item
+    pointing them at the right kind of search.
+    """
+    if not drafts_path.is_file():
+        return []
+    try:
+        data = json.loads(drafts_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    role_specific_gaps = {
+        "designer": [
+            ("ux-writing", "UX writing / microcopy skill", "Used by designer-content. Search: 'claude skill ux writing', 'claude code microcopy'."),
+            ("figma-export", "Figma export / figma-to-code skill", "Used by designer-researcher + designer-implementer for pulling real frames. Search: 'claude skill figma export'."),
+            ("design-system-audit", "Design-system audit / component-inventory skill", "Used by designer-implementer to scout existing components. Search: 'claude code design system audit', 'component inventory skill'."),
+            ("user-research-synthesis", "User-research synthesis skill", "Used by designer-researcher to parse Dovetail / interview transcripts. Search: 'claude skill user research synthesis'."),
+        ],
+    }
+    gaps = role_specific_gaps.get(role, [])
+    if not gaps:
+        return []
+    missing_skills_in_drafts: set[str] = set()
+    for draft in data.get("drafts", []):
+        for s in draft.get("preferred_skills_missing", []):
+            missing_skills_in_drafts.add(s)
+    items: list[dict] = []
+    for slug, title, search_hint in gaps:
+        items.append({
+            "id": f"manual-find-skill:{slug}",
+            "type": "manual-find-skill",
+            "scope": "manual",
+            "target_path": "(external)",
+            "before": "(not installed)",
+            "after": f"User finds and installs a {title.lower()}",
+            "rationale": (
+                f"{title} would meaningfully improve the {role} chain. "
+                f"{search_hint} Paste the GitHub URL back to /auto-tune and it will quarantine-fetch + scan."
+            ),
+            "est_token_savings": 0,
+        })
+    return items
+
+
 def propose_security_hook() -> list[dict]:
     settings_path = CLAUDE_DIR / "settings.json"
     security_py = Path(__file__).resolve().parent / "security.py"
@@ -602,7 +756,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--corrections", default=str(Path(__file__).resolve().parent.parent / "cache" / "corrections.json"))
     p.add_argument("--composition", default=str(Path(__file__).resolve().parent.parent / "cache" / "composition.json"))
     p.add_argument("--subagents", default=str(Path(__file__).resolve().parent.parent / "cache" / "subagent_drafts.json"))
+    p.add_argument("--upgrades", default=str(Path(__file__).resolve().parent.parent / "cache" / "upgrades.json"))
+    p.add_argument("--drift", default=str(Path(__file__).resolve().parent.parent / "cache" / "drift.json"))
     p.add_argument("--with-security-hook", action="store_true")
+    p.add_argument("--with-branch-isolate", action="store_true")
     args = p.parse_args(argv)
 
     signals = json.loads(Path(args.signals).read_text(encoding="utf-8"))
@@ -618,6 +775,15 @@ def main(argv: list[str]) -> int:
     items += propose_personalizations(Path(args.composition))
     items += propose_compose_summary(Path(args.composition))
     items += propose_subagents(Path(args.subagents))
+    items += propose_upgrades(Path(args.upgrades))
+    items += propose_restores(Path(args.drift))
+    items += propose_missing_skill_gaps(args.role, Path(args.subagents))
+    will_write_project_files = any(
+        i.get("type") in ("gen-claude-md", "prune-skill", "prune-mcp")
+        and i.get("scope") == "project"
+        for i in items
+    )
+    items += propose_branch_isolate(cwd, args.with_branch_isolate, will_write_project_files)
     if args.with_security_hook:
         items += propose_security_hook()
 
@@ -640,6 +806,10 @@ def main(argv: list[str]) -> int:
             "compose_bundle": sum(1 for i in items if i["type"] == "compose-bundle"),
             "gen_subagent": sum(1 for i in items if i["type"] == "gen-subagent"),
             "add_hook": sum(1 for i in items if i["type"] == "add-hook"),
+            "swap_skill": sum(1 for i in items if i["type"] == "swap-skill"),
+            "restore_skill": sum(1 for i in items if i["type"] == "restore-skill"),
+            "branch_isolate": sum(1 for i in items if i["type"] == "branch-isolate"),
+            "manual_find_skill": sum(1 for i in items if i["type"] == "manual-find-skill"),
             "est_total_token_savings": sum(i.get("est_token_savings", 0) for i in items),
         },
     }

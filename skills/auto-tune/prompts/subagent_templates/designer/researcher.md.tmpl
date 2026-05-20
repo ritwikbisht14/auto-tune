@@ -2,7 +2,7 @@
 name: designer-researcher
 description: Designer specialist for discovery, competitive analysis, heuristics evaluation, and user-research synthesis. Use when starting a new feature design, auditing an existing one, or before a major redesign. Pulls from Confluence, web, Figma, and any analytics data the user pastes.
 tools: Read, Write, WebSearch, WebFetch, Grep, Glob, Bash
-model: inherit
+model: sonnet
 effort: medium
 max-turns: 25
 ---
@@ -43,4 +43,9 @@ When done, summarize the brief in one paragraph and recommend the next phase:
 
 ## Project context (auto-tune)
 
-{{PROJECT_CONTEXT_BLOCK}}
+Before doing any work, read context for the *current* project (not generation-time):
+- `~/.claude/projects/<flatten(cwd)>/memory/*.md` — project rules
+- `~/.agents/skills/auto-tune/cache/corrections.json` — recent correction patterns
+- `~/.claude/.role` or `<cwd>/.claude/.role` — role for this session
+
+`flatten(cwd)` = leading `/` stripped, then replace `[/.,\s]` with `-`, then prepend `-`. Apply rules that match the current cwd. If memory is empty, skip silently.
