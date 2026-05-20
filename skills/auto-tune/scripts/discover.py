@@ -126,6 +126,55 @@ def readme_self_describes_claude(body: str) -> bool:
     return any(marker in low for marker in README_CLAUDE_MARKERS)
 
 
+def popularity_factor(popularity: int, kind: str) -> float:
+    """Map a raw popularity number to 0..1 with a log curve so a few stars/upvotes
+    move the needle but viral hits don't dominate."""
+    import math
+    if not popularity or popularity <= 0:
+        return 0.0
+    saturation = {
+        "stars": 500,
+        "reddit_upvotes": 200,
+        "hn_points": 150,
+    }.get(kind, 200)
+    return min(1.0, math.log1p(popularity) / math.log1p(saturation))
+
+
+def recency_factor(iso_ts: str | None) -> float:
+    """1.0 for activity within the last 14 days, decaying linearly to 0 over 365 days."""
+    if not iso_ts:
+        return 0.3
+    try:
+        ts = dt.datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return 0.3
+    now = dt.datetime.now(dt.timezone.utc)
+    days = (now - ts).total_seconds() / 86400.0
+    if days <= 14:
+        return 1.0
+    if days >= 365:
+        return 0.0
+    return max(0.0, 1.0 - (days - 14) / (365 - 14))
+
+
+def quality_score(role_rel: float, popularity: int, popularity_kind: str,
+                  last_activity_at: str | None, trusted_author: bool) -> dict:
+    rel = role_rel
+    pop = popularity_factor(popularity, popularity_kind)
+    rec = recency_factor(last_activity_at)
+    trust = 1.0 if trusted_author else 0.0
+    weighted = 0.40 * rel + 0.25 * pop + 0.20 * rec + 0.15 * trust
+    return {
+        "score": round(weighted, 3),
+        "components": {
+            "role_relevance": round(rel, 3),
+            "popularity": round(pop, 3),
+            "recency": round(rec, 3),
+            "trust": trust,
+        },
+    }
+
+
 def _github_request(url: str, use_token: bool) -> tuple[dict | None, str | None]:
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "auto-tune-discover/0.2"}
     if use_token:
@@ -140,6 +189,37 @@ def _github_request(url: str, use_token: bool) -> tuple[dict | None, str | None]
         return None, f"HTTP {e.code}"
     except (urllib.error.URLError, json.JSONDecodeError) as e:
         return None, str(e)
+
+
+def _gh_item_to_candidate(item: dict, source_provider: str, extra_meta: dict | None = None) -> dict:
+    name = item.get("name") or item.get("full_name", "")
+    full_name = item.get("full_name", "")
+    default_branch = item.get("default_branch") or "HEAD"
+    readme_url = (
+        f"https://raw.githubusercontent.com/{full_name}/{default_branch}/README.md"
+        if full_name else item.get("html_url")
+    )
+    pushed_at = item.get("pushed_at") or item.get("updated_at")
+    return {
+        "name": name,
+        "source_url": readme_url,
+        "html_url": item.get("html_url"),
+        "source_provider": source_provider,
+        "description": (item.get("description") or "")[:280],
+        "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "popularity": int(item.get("stargazers_count") or 0),
+        "popularity_kind": "stars",
+        "last_activity_at": pushed_at,
+        "topics": item.get("topics", [])[:10],
+        "forks": int(item.get("forks_count") or 0),
+        "open_issues": int(item.get("open_issues_count") or 0),
+        "has_license": bool(item.get("license")),
+        "raw_excerpt": json.dumps({
+            "stars": item.get("stargazers_count"),
+            "topics": item.get("topics", []),
+            **(extra_meta or {}),
+        })[:200],
+    }
 
 
 def github_trusted_author_search(role: str, security_mod, trusted_authors: set[str], limit: int = 6) -> list[dict]:
@@ -165,22 +245,7 @@ def github_trusted_author_search(role: str, security_mod, trusted_authors: set[s
             results.append({"_error": f"github-trusted:{author}:{err}"})
             continue
         for item in (data.get("items") or [])[:limit]:
-            name = item.get("name") or item.get("full_name", "")
-            full_name = item.get("full_name", "")
-            default_branch = item.get("default_branch") or "HEAD"
-            readme_url = (
-                f"https://raw.githubusercontent.com/{full_name}/{default_branch}/README.md"
-                if full_name else item.get("html_url")
-            )
-            results.append({
-                "name": name,
-                "source_url": readme_url,
-                "html_url": item.get("html_url"),
-                "source_provider": "github-trusted",
-                "description": (item.get("description") or "")[:280],
-                "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                "raw_excerpt": json.dumps({"stars": item.get("stargazers_count"), "topics": item.get("topics", []), "trusted_author": author})[:200],
-            })
+            results.append(_gh_item_to_candidate(item, "github-trusted", {"trusted_author": author}))
     return results
 
 
@@ -205,22 +270,7 @@ def github_search(role: str, security_mod, limit: int = 8) -> list[dict]:
             results.append({"_error": f"github:{topic}:{err}"})
             continue
         for item in (data.get("items") or [])[:limit]:
-            name = item.get("name") or item.get("full_name", "")
-            full_name = item.get("full_name", "")
-            default_branch = item.get("default_branch") or "HEAD"
-            readme_url = (
-                f"https://raw.githubusercontent.com/{full_name}/{default_branch}/README.md"
-                if full_name else item.get("html_url")
-            )
-            results.append({
-                "name": name,
-                "source_url": readme_url,
-                "html_url": item.get("html_url"),
-                "source_provider": "github",
-                "description": (item.get("description") or "")[:280],
-                "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                "raw_excerpt": json.dumps({"stars": item.get("stargazers_count"), "topics": item.get("topics", [])})[:200],
-            })
+            results.append(_gh_item_to_candidate(item, "github"))
     return results
 
 
@@ -532,15 +582,24 @@ def main(argv: list[str]) -> int:
                     diagnostics.append({"_readme_no_claude": url, "sha256": sha256})
                     continue
 
+        qs = quality_score(
+            role_rel=rel,
+            popularity=int(it.get("popularity") or 0),
+            popularity_kind=it.get("popularity_kind") or "stars",
+            last_activity_at=it.get("last_activity_at"),
+            trusted_author=is_trusted_author,
+        )
         candidates.append({
             **it,
             "role_relevance": round(rel, 3),
+            "quality_score": qs["score"],
+            "quality_components": qs["components"],
             "security_status": quarantine_status,
             "quarantine_sha256": sha256,
             "findings": findings,
         })
 
-    candidates.sort(key=lambda c: -c.get("role_relevance", 0.0))
+    candidates.sort(key=lambda c: -c.get("quality_score", 0.0))
 
     out = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),

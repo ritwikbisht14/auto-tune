@@ -371,6 +371,18 @@ def propose_external_candidates(candidates_path: Path) -> list[dict]:
                 f"Description: {c.get('description', '')}\n"
             )
 
+        qc = c.get("quality_components") or {}
+        pop = c.get("popularity") or 0
+        pop_kind = c.get("popularity_kind") or "stars"
+        last_act = c.get("last_activity_at") or "?"
+        rationale_parts = [
+            f"quality {c.get('quality_score', 0):.2f}",
+            f"role-rel {qc.get('role_relevance', c.get('role_relevance', 0)):.2f}",
+            f"{pop} {pop_kind}",
+            f"recency {qc.get('recency', 0):.2f} (last {last_act[:10]})",
+        ]
+        if qc.get("trust"):
+            rationale_parts.append("trusted-author")
         proposals.append({
             "id": f"{kind}:{slug}",
             "type": kind,
@@ -378,13 +390,17 @@ def propose_external_candidates(candidates_path: Path) -> list[dict]:
             "target_path": str(target),
             "after": after_desc,
             "rationale": (
-                f"role-relevance {c.get('role_relevance', 0):.2f} from {provider}; "
-                f"{('quarantined clean' if c.get('quarantine_sha256') else 'link-only recommendation')}."
+                f"{provider}: " + ", ".join(rationale_parts) +
+                f"; {('quarantined clean' if c.get('quarantine_sha256') else 'link-only recommendation')}."
             ),
             "est_token_savings": 0,
             "enable_command": f"ln -s {AGENTS_SKILLS / slug} {CLAUDE_DIR / 'skills' / slug}",
             "source_url": url,
             "quarantine_sha256": c.get("quarantine_sha256"),
+            "popularity": pop,
+            "popularity_kind": pop_kind,
+            "last_activity_at": last_act,
+            "quality_score": c.get("quality_score"),
         })
     return proposals
 

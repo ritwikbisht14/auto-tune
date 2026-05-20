@@ -113,6 +113,13 @@ def reddit_search(role: str, security_mod, queries: list[str] | None = None) -> 
                 title = (d.get("title") or "").strip()
                 selftext = (d.get("selftext") or "")[:4000]
                 permalink = "https://www.reddit.com" + (d.get("permalink") or "")
+                score = int(d.get("score") or 0)
+                num_comments = int(d.get("num_comments") or 0)
+                created_utc = d.get("created_utc")
+                last_activity = (
+                    dt.datetime.fromtimestamp(created_utc, dt.timezone.utc).isoformat()
+                    if created_utc else None
+                )
                 urls = extract_github_urls(title + "\n" + selftext)
                 for u in urls:
                     repo = normalize_repo(u) or (u.rsplit("/", 1)[-1] or "gist", u)
@@ -125,7 +132,11 @@ def reddit_search(role: str, security_mod, queries: list[str] | None = None) -> 
                         "source_provider": "reddit",
                         "description": (title[:220]),
                         "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                        "raw_excerpt": f"sub=r/{sub} thread={permalink}",
+                        "popularity": score,
+                        "popularity_kind": "reddit_upvotes",
+                        "num_comments": num_comments,
+                        "last_activity_at": last_activity,
+                        "raw_excerpt": f"sub=r/{sub} thread={permalink} score={score} comments={num_comments}",
                     })
     return out
 
@@ -158,6 +169,13 @@ def hn_search(role: str, security_mod, queries: list[str] | None = None) -> list
             title = (hit.get("title") or "").strip()
             story_url = (hit.get("url") or "").strip()
             story_text = (hit.get("story_text") or "")[:4000]
+            points = int(hit.get("points") or 0)
+            num_comments = int(hit.get("num_comments") or 0)
+            created_at_i = hit.get("created_at_i")
+            last_activity = (
+                dt.datetime.fromtimestamp(created_at_i, dt.timezone.utc).isoformat()
+                if created_at_i else hit.get("created_at")
+            )
             urls = extract_github_urls(title + " " + story_url + "\n" + story_text)
             for u in urls:
                 if u in seen:
@@ -172,7 +190,11 @@ def hn_search(role: str, security_mod, queries: list[str] | None = None) -> list
                     "source_provider": "hn",
                     "description": (title[:220]),
                     "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                    "raw_excerpt": f"hn_story=https://news.ycombinator.com/item?id={hit.get('objectID','')} points={hit.get('points','-')}",
+                    "popularity": points,
+                    "popularity_kind": "hn_points",
+                    "num_comments": num_comments,
+                    "last_activity_at": last_activity,
+                    "raw_excerpt": f"hn_story=https://news.ycombinator.com/item?id={hit.get('objectID','')} points={points} comments={num_comments}",
                 })
     return out
 
