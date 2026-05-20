@@ -268,6 +268,51 @@ def propose_claude_md(signals: dict, role: str, cwd: str) -> list[dict]:
     if before.strip() == after.strip():
         return proposals
 
+    # Safety rule: if a CLAUDE.md exists but does NOT carry the auto-tune marker,
+    # treat it as team-authored and never overwrite. Propose an additive appendix
+    # instead so the team's text is preserved.
+    auto_tune_marker = "<!-- auto-tune-generated"
+    file_is_team_authored = before and auto_tune_marker not in before
+    if file_is_team_authored:
+        # Build an additive appendix that adds only role-specific guidance + the
+        # auto-tune marker. We deliberately drop the full template body — the
+        # team's existing CLAUDE.md already establishes the project's conventions.
+        appendix_lines = [
+            "",
+            "<!-- auto-tune-generated-appendix: do not delete this comment. auto-tune appended the section below; the team's content above stays untouched. -->",
+            "",
+            f"## auto-tune addendum (role: {role})",
+            "",
+        ]
+        if rules:
+            appendix_lines.append("Project rules from memory:")
+            for title, desc in rules:
+                appendix_lines.append(f"- **{title}** — {desc}")
+            appendix_lines.append("")
+        if role_section:
+            appendix_lines.append(role_section)
+        appendix = "\n".join(appendix_lines).rstrip() + "\n"
+
+        # Skip if our appendix is already present (idempotent).
+        if "auto-tune-generated-appendix" in before:
+            return proposals
+        proposals.append({
+            "id": "append-claude-md:project",
+            "type": "append-claude-md",
+            "scope": "project",
+            "target_path": str(target),
+            "before": before,
+            "after": before.rstrip() + "\n\n" + appendix,
+            "appendix": appendix,
+            "rationale": (
+                f"role={role}, {project_bucket['session_count']} sessions. "
+                "Existing CLAUDE.md appears team-authored (no auto-tune marker). "
+                "Proposing an additive appendix; team content stays intact."
+            ),
+            "est_token_savings": 0,
+        })
+        return proposals
+
     proposals.append({
         "id": "gen-claude-md:project",
         "type": "gen-claude-md",
@@ -798,6 +843,7 @@ def main(argv: list[str]) -> int:
             "prune_mcp": sum(1 for i in items if i["type"] == "prune-mcp"),
             "add_mcp": sum(1 for i in items if i["type"] == "add-mcp"),
             "gen_claude_md": sum(1 for i in items if i["type"] == "gen-claude-md"),
+            "append_claude_md": sum(1 for i in items if i["type"] == "append-claude-md"),
             "gen_skill": sum(1 for i in items if i["type"] == "gen-skill"),
             "add_skill_external": sum(1 for i in items if i["type"] == "add-skill-external"),
             "recommend_agent_external": sum(1 for i in items if i["type"] == "recommend-agent-external"),

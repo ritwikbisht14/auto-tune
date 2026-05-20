@@ -92,8 +92,28 @@ def apply_prune_mcp(item: dict, dry_run: bool) -> dict:
     return {"status": "applied", "undo": f"remove {mcp_name!r} from disabledMcpjsonServers in {settings_path}"}
 
 
+CLAUDE_MD_MARKER = "<!-- auto-tune-generated"
+
+
 def apply_gen_claude_md(item: dict, dry_run: bool) -> dict:
+    """Write or replace a CLAUDE.md. Refuses to overwrite a team-authored file
+    (one that exists but lacks the auto-tune-generated marker).
+
+    propose.py is supposed to route team-authored cases to `append-claude-md`,
+    but this is the second line of defense — if a `gen-claude-md` item targets
+    a marker-less file, refuse here too.
+    """
     target = Path(item["target_path"])
+    if target.is_file():
+        existing = target.read_text(encoding="utf-8", errors="ignore")
+        if existing.strip() and CLAUDE_MD_MARKER not in existing:
+            return {
+                "status": "skipped",
+                "reason": (
+                    f"{target} appears team-authored (no auto-tune marker). "
+                    "Refusing to overwrite. Use an `append-claude-md` proposal instead."
+                ),
+            }
     if dry_run:
         return {"status": "dry-run", "would": f"write {target} ({len(item['after'])} bytes)"}
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +125,30 @@ def apply_gen_claude_md(item: dict, dry_run: bool) -> dict:
         undo = f"rm {target}"
     target.write_text(item["after"], encoding="utf-8")
     return {"status": "applied", "undo": undo}
+
+
+def apply_append_claude_md(item: dict, dry_run: bool) -> dict:
+    """Append an auto-tune addendum to an existing team-authored CLAUDE.md.
+
+    Strictly additive: the team's existing content is preserved verbatim; only
+    a fenced appendix is appended. Idempotent — if our appendix marker is
+    already present, skip.
+    """
+    target = Path(item["target_path"])
+    if not target.is_file():
+        return {"status": "skipped", "reason": f"{target} does not exist; use gen-claude-md to create it"}
+    existing = target.read_text(encoding="utf-8", errors="ignore")
+    if "auto-tune-generated-appendix" in existing:
+        return {"status": "skipped", "reason": "appendix already present (idempotent)"}
+    appendix = item.get("appendix") or ""
+    if not appendix.strip():
+        return {"status": "skipped", "reason": "append-claude-md item has empty appendix"}
+    if dry_run:
+        return {"status": "dry-run", "would": f"append {len(appendix)} bytes to {target}"}
+    backup = target.with_suffix(target.suffix + ".autotune.bak")
+    backup.write_text(existing, encoding="utf-8")
+    target.write_text(existing.rstrip() + "\n\n" + appendix, encoding="utf-8")
+    return {"status": "applied", "undo": f"mv {backup} {target}"}
 
 
 def apply_gen_skill(item: dict, dry_run: bool) -> dict:
@@ -431,6 +475,7 @@ HANDLERS = {
     "prune-skill": apply_prune_skill,
     "prune-mcp": apply_prune_mcp,
     "gen-claude-md": apply_gen_claude_md,
+    "append-claude-md": apply_append_claude_md,
     "gen-skill": apply_gen_skill,
     "add-mcp": apply_add_mcp,
     "add-skill-external": apply_add_skill_external,

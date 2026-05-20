@@ -1,3 +1,4 @@
+<!-- auto-tune-generated: do not delete this comment. auto-tune will refuse to overwrite this file if the comment is missing. -->
 # CLAUDE.md
 
 This folder is worked on as: **{{ROLE}}**.
