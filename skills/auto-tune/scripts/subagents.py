@@ -46,7 +46,7 @@ CHAINS: dict[str, list[dict]] = {
          "preferred_skills": [],
          "placeholders": ["{{CONNECTED_DATA_SOURCES}}"]},
         {"name": "designer-researcher", "template": "researcher.md.tmpl", "phase": "research",
-         "preferred_mcps": ["atlassian", "chrome-devtools", "figma-dev"],
+         "preferred_mcps": ["atlassian", "chrome-devtools", "figma-dev", "slack"],
          "preferred_skills": [],
          "placeholders": ["{{CONNECTED_DATA_SOURCES}}"]},
         {"name": "designer-content", "template": "content.md.tmpl", "phase": "callable-anywhere",
@@ -92,7 +92,7 @@ MCP_DESCRIPTIONS = {
     "chrome-devtools": "Live browser inspection (chrome-devtools MCP)",
     "figma-dev": "Figma file access (figma-dev MCP)",
     "github": "GitHub repo access (github MCP)",
-    "slack": "Slack channels + messages (slack MCP)",
+    "slack": "Slack channels + messages (Slack MCP — read-only for feedback mining)",
     "linear": "Linear issue tracking (linear MCP)",
 }
 

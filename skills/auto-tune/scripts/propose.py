@@ -378,7 +378,78 @@ def propose_skill_stubs(signals: dict, role: str, cwd: str) -> list[dict]:
     return proposals
 
 
-def propose_external_candidates(candidates_path: Path) -> list[dict]:
+def _load_facets_for_role(role: str) -> dict:
+    """v5.3: lazy-import compose.FACETS so we can group external candidates by facet."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "auto_tune_compose",
+            Path(__file__).resolve().parent / "compose.py",
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.FACETS.get(role) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _infer_facet(candidate: dict, role_facets: dict) -> str | None:
+    """v5.3: infer which facet this candidate belongs to by matching its
+    description against each facet's keywords. Returns the best-matching facet
+    name, or None if no facet shows ≥1 keyword overlap."""
+    if not role_facets:
+        return None
+    # Curated seeds already carry a facet_hint.
+    if candidate.get("facet_hint"):
+        return candidate["facet_hint"]
+    text = f"{candidate.get('name','')} {candidate.get('description','')}".lower()
+    best_facet = None
+    best_score = 0
+    for facet_name, facet_def in role_facets.items():
+        keywords = facet_def.get("keywords", [])
+        if not keywords:
+            continue
+        score = sum(1 for kw in keywords if kw in text)
+        if score > best_score:
+            best_score = score
+            best_facet = facet_name
+    return best_facet if best_score >= 1 else None
+
+
+def _why_this_line(c: dict) -> str:
+    """v5.3: one-line rationale highlighting the strongest signal contributors."""
+    qc = c.get("quality_components") or {}
+    parts: list[str] = []
+    if c.get("source_provider") == "curated":
+        parts.append("curated editorial pick")
+        if c.get("_curated_rationale"):
+            return "Why: " + c["_curated_rationale"]
+    if qc.get("trust"):
+        parts.append("trusted author")
+    cross_boost = qc.get("cross_provider_boost", 0)
+    if cross_boost >= 0.10:
+        cnt = c.get("cross_provider_count", 0)
+        parts.append(f"in {cnt} providers")
+    pop = c.get("popularity") or 0
+    if pop >= 50:
+        parts.append(f"{pop} {c.get('popularity_kind','stars')}")
+    if qc.get("active_maintenance_bonus", 0) > 0:
+        parts.append("active (last 90d)")
+    if qc.get("structure", 0) >= 0.5 or qc.get("structure_contrib", 0) >= 0.10:
+        parts.append("real SKILL.md + scaffolding")
+    fb = qc.get("feedback_adjustment", 0)
+    if fb >= 0.15:
+        parts.append("matches your prior installs")
+    elif fb <= -0.15:
+        parts.append("⚠ near a prior rejection")
+    if not parts:
+        parts.append(f"role-relevance {qc.get('role_relevance', 0):.2f}")
+    return "Why: " + " • ".join(parts)
+
+
+def propose_external_candidates(candidates_path: Path, role: str = "designer",
+                                 max_per_facet: int = 3,
+                                 show_all: bool = False) -> list[dict]:
     if not candidates_path.is_file():
         return []
     try:
@@ -386,6 +457,10 @@ def propose_external_candidates(candidates_path: Path) -> list[dict]:
     except json.JSONDecodeError:
         return []
     proposals: list[dict] = []
+    role_facets = _load_facets_for_role(role)
+
+    # v5.3: bucket candidates by facet first; cap each bucket later.
+    by_facet: dict[str | None, list[dict]] = {}
     for c in data.get("candidates", []):
         if c.get("security_status") not in ("clean", "skipped(dry-run)"):
             continue
@@ -394,72 +469,97 @@ def propose_external_candidates(candidates_path: Path) -> list[dict]:
         if not name or not url:
             continue
         slug = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")[:48] or "external"
-        provider = c.get("source_provider", "external")
         target = AGENTS_SKILLS / slug / "SKILL.md"
         if target.exists():
             continue
+        facet = _infer_facet(c, role_facets)
+        by_facet.setdefault(facet, []).append({**c, "_slug": slug, "_target": str(target)})
 
-        if c.get("security_status") == "clean" and c.get("quarantine_sha256"):
-            kind = "add-skill-external"
-            after_desc = (
-                f"# {name}\n\n"
-                f"Source: {url}\n"
-                f"Provider: {provider}\n"
-                f"Description: {c.get('description', '')}\n\n"
-                "(Body fetched and quarantined; promote with apply.py after manual review of the quarantined source.)\n"
-            )
-        else:
-            kind = "recommend-agent-external"
-            after_desc = (
-                f"# {name}\n\n"
-                f"Source: {url}\nProvider: {provider}\n"
-                f"Description: {c.get('description', '')}\n"
+    # Sort each facet bucket by quality_score desc, cap at max_per_facet.
+    overflow_count = 0
+    for facet, items in by_facet.items():
+        items.sort(key=lambda x: -x.get("quality_score", 0.0))
+        kept = items if show_all else items[:max_per_facet]
+        overflow_count += max(0, len(items) - len(kept))
+        for c in kept:
+            slug = c["_slug"]
+            target_str = c["_target"]
+            url = c.get("source_url", "")
+            name = c.get("name", "")
+            provider = c.get("source_provider", "external")
+            qc = c.get("quality_components") or {}
+            pop = c.get("popularity") or 0
+            pop_kind = c.get("popularity_kind") or "stars"
+            last_act = c.get("last_activity_at") or "?"
+
+            if c.get("security_status") == "clean" and c.get("quarantine_sha256"):
+                kind = "add-skill-external"
+                after_desc = (
+                    f"# {name}\n\n"
+                    f"Source: {url}\nProvider: {provider}\n"
+                    f"Description: {c.get('description', '')}\n\n"
+                    "(Body fetched and quarantined; promote with apply.py after manual review of the quarantined source.)\n"
+                )
+            else:
+                kind = "recommend-agent-external"
+                after_desc = (
+                    f"# {name}\n\n"
+                    f"Source: {url}\nProvider: {provider}\n"
+                    f"Description: {c.get('description', '')}\n"
+                )
+
+            facet_label = facet or "uncategorized"
+            why_line = _why_this_line(c)
+            rationale = (
+                f"[{facet_label}] {provider} • quality {c.get('quality_score', 0):.2f} "
+                f"• role-rel {qc.get('role_relevance', c.get('role_relevance', 0)):.2f} "
+                f"• {pop} {pop_kind} • last {last_act[:10] if last_act else '?'}\n"
+                f"{why_line}"
             )
 
-        qc = c.get("quality_components") or {}
-        pop = c.get("popularity") or 0
-        pop_kind = c.get("popularity_kind") or "stars"
-        last_act = c.get("last_activity_at") or "?"
-        rationale_parts = [
-            f"quality {c.get('quality_score', 0):.2f}",
-            f"role-rel {qc.get('role_relevance', c.get('role_relevance', 0)):.2f}",
-            f"{pop} {pop_kind}",
-            f"recency {qc.get('recency', 0):.2f} (last {last_act[:10]})",
-        ]
-        if qc.get("trust"):
-            rationale_parts.append("trusted-author")
-        insp = c.get("inspection") or {}
-        structure_bits: list[str] = []
-        if insp.get("skill_md_path"):
-            structure_bits.append(f"SKILL.md={insp['skill_md_path']}")
-        if insp.get("examples_dir"):
-            structure_bits.append("examples/")
-        if insp.get("tests_dir"):
-            structure_bits.append("tests/")
-        if insp.get("scripts_dir"):
-            structure_bits.append("scripts/")
-        if insp.get("has_releases"):
-            structure_bits.append(f"release {insp.get('release_latest_tag','')}")
-        if structure_bits:
-            rationale_parts.append("structure: " + ", ".join(structure_bits))
-        proposals.append({
-            "id": f"{kind}:{slug}",
-            "type": kind,
-            "scope": "global",
-            "target_path": str(target),
-            "after": after_desc,
-            "rationale": (
-                f"{provider}: " + ", ".join(rationale_parts) +
-                f"; {('quarantined clean' if c.get('quarantine_sha256') else 'link-only recommendation')}."
-            ),
+            proposals.append({
+                "id": f"{kind}:{slug}",
+                "type": kind,
+                "scope": "global",
+                "target_path": target_str,
+                "after": after_desc,
+                "rationale": rationale,
+                "est_token_savings": 0,
+                "enable_command": f"ln -s {AGENTS_SKILLS / slug} {CLAUDE_DIR / 'skills' / slug}",
+                "source_url": url,
+                "quarantine_sha256": c.get("quarantine_sha256"),
+                "popularity": pop,
+                "popularity_kind": pop_kind,
+                "last_activity_at": last_act,
+                "quality_score": c.get("quality_score"),
+                "facet": facet,
+                "candidate_name": name,
+            })
+
+    # v5.3: surface filter diagnostics as a synthetic item so the user sees what was dropped.
+    diag = data.get("diagnostics") or []
+    if diag or overflow_count:
+        filter_counts: dict[str, int] = {}
+        for d in diag:
+            for k in d.keys():
+                if k.startswith("_"):
+                    filter_counts[k] = filter_counts.get(k, 0) + 1
+        filter_summary = ", ".join(f"{c} {k.lstrip('_')}" for k, c in sorted(filter_counts.items(), key=lambda x: -x[1])[:6])
+        summary_text = (
+            f"Discovery summary: {len(proposals)} candidates surfaced across "
+            f"{len([f for f in by_facet if f])} role facets.\n"
+            f"- Filtered out: {filter_summary or '(none)'}\n"
+            f"- Capped: {overflow_count} candidates below the top-{max_per_facet}-per-facet cut "
+            f"(run with --show-all to see the full list)."
+        )
+        proposals.insert(0, {
+            "id": "discovery-summary",
+            "type": "discovery-summary",
+            "scope": "info",
+            "target_path": "(info)",
+            "after": summary_text,
+            "rationale": "v5.3: read-only summary of what discovery filtered/kept.",
             "est_token_savings": 0,
-            "enable_command": f"ln -s {AGENTS_SKILLS / slug} {CLAUDE_DIR / 'skills' / slug}",
-            "source_url": url,
-            "quarantine_sha256": c.get("quarantine_sha256"),
-            "popularity": pop,
-            "popularity_kind": pop_kind,
-            "last_activity_at": last_act,
-            "quality_score": c.get("quality_score"),
         })
     return proposals
 
@@ -805,6 +905,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--drift", default=str(Path(__file__).resolve().parent.parent / "cache" / "drift.json"))
     p.add_argument("--with-security-hook", action="store_true")
     p.add_argument("--with-branch-isolate", action="store_true")
+    p.add_argument("--max-per-facet", type=int, default=3,
+                   help="v5.3: cap external candidates surfaced per facet (default 3)")
+    p.add_argument("--show-all", action="store_true",
+                   help="v5.3: include all external candidates, not just top per facet")
     args = p.parse_args(argv)
 
     signals = json.loads(Path(args.signals).read_text(encoding="utf-8"))
@@ -815,7 +919,12 @@ def main(argv: list[str]) -> int:
     items += propose_mcp_actions(signals, args.role, cwd)
     items += propose_claude_md(signals, args.role, cwd)
     items += propose_skill_stubs(signals, args.role, cwd)
-    items += propose_external_candidates(Path(args.candidates))
+    items += propose_external_candidates(
+        Path(args.candidates),
+        role=args.role,
+        max_per_facet=args.max_per_facet,
+        show_all=args.show_all,
+    )
     items += propose_tweaks(Path(args.corrections))
     items += propose_personalizations(Path(args.composition))
     items += propose_compose_summary(Path(args.composition))
@@ -856,6 +965,7 @@ def main(argv: list[str]) -> int:
             "restore_skill": sum(1 for i in items if i["type"] == "restore-skill"),
             "branch_isolate": sum(1 for i in items if i["type"] == "branch-isolate"),
             "manual_find_skill": sum(1 for i in items if i["type"] == "manual-find-skill"),
+            "discovery_summary": sum(1 for i in items if i["type"] == "discovery-summary"),
             "est_total_token_savings": sum(i.get("est_token_savings", 0) for i in items),
         },
     }

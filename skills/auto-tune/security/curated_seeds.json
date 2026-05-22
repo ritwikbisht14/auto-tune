@@ -1,0 +1,36 @@
+{
+  "_comment": "Editorial seed list of known-good skills per role + facet. Bypasses discovery entirely — they're always considered for compose.py's facet picks. The user can append their own picks (mark added_by_user: true). Keep entries lean: repo identifier + role + facet only; everything else is computed at runtime.",
+  "_format_doc": "Each entry: {\"repo\": \"owner/repo\", \"added_by_user\": bool, \"why\": \"<one-line rationale>\"}. The 'why' string surfaces in the proposal as the rationale.",
+
+  "designer": {
+    "spec_audit": [
+      {"repo": "pbakaus/impeccable", "added_by_user": false, "why": "design audit & critique skill from a former Google design lead — high signal for spec-stage review"},
+      {"repo": "emilkowalski/skill", "added_by_user": false, "why": "design engineering skill from emilkowalski (Sonner, Vaul, etc.) — invisible details, hover/focus states, micro-interactions"}
+    ],
+    "implementation": [
+      {"repo": "ibelick/ui-skills", "added_by_user": false, "why": "baseline-ui + component patterns from ibelick — design-token enforcement, layout primitives"},
+      {"repo": "vercel-labs/skills", "added_by_user": false, "why": "vercel-labs canonical skills bundle — React/Next best practices for design implementations"}
+    ],
+    "accessibility": [],
+    "motion": [],
+    "polish": [
+      {"repo": "pbakaus/impeccable", "added_by_user": false, "why": "the impeccable skill also covers polish-stage review"},
+      {"repo": "emilkowalski/skill", "added_by_user": false, "why": "emilkowalski's skill is specifically about polish-level details"}
+    ],
+    "metadata": [],
+    "research": []
+  },
+
+  "pm": {
+    "ticket_workflow": [],
+    "spec_writing": []
+  },
+
+  "engineer": {
+    "review": [],
+    "security_review": [],
+    "react_perf": [
+      {"repo": "vercel-labs/skills", "added_by_user": false, "why": "vercel-labs ships react/next best-practices skills authored by the Next core team"}
+    ]
+  }
+}

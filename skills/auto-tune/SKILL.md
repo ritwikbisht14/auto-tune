@@ -27,6 +27,9 @@ Parse from the user's message:
 - `--refresh` — also run `refresh.py` to look for higher-quality community alternatives to installed skills. Emits `swap-skill` items. Opt-in; recommended weekly cadence.
 - `--refresh-content` — re-fetch the designer-content Confluence catalog from the folder defined in `config/designer-content.json` and update that config with any newly-discovered pages. Run when new pages are added to your UX copy folder.
 - `--branch-isolate` — append a fenced block to `<project>/.gitignore` so per-project auto-tune writes (`CLAUDE.md`, `settings.local.json`, `agents/`) stay in the user's tree only and don't merge into team branches. Idempotent.
+- `--max-per-facet N` (v5.3) — cap external-skill candidates surfaced per facet. Default 3. Pass `--show-all` to disable the cap.
+- `--show-all` (v5.3) — include every external candidate, not just the top per facet. Useful when you want to audit what discovery dropped.
+- `--track-rejections` (passed to apply.py, v5.3) — log unapproved `add-skill-external` / `swap-skill` items as rejections in `cache/feedback_history.json` so the next discovery downweights them.
 
 Default invocation = analyze current folder, detect corrections, propose, confirm each change, apply approved subset. No discovery unless `--discover` or `--global`.
 
@@ -142,6 +145,7 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    - `restore-skill` (v5) — re-enable a previously-pruned skill that the user keeps asking about
    - `branch-isolate` (v5) — append fenced block to `<project>/.gitignore` (requires `--branch-isolate`)
    - `manual-find-skill` (v5) — surface a skill gap for the user to find externally; paste the URL back to /auto-tune to wire it in
+   - `discovery-summary` (v5.3) — read-only info item shown at the top of the discovery section; lists how many candidates were filtered (spam-username, README-thin, created-pushed gap, etc.) and how many were capped by the per-facet limit. Helps the user sanity-check that good candidates weren't being dropped.
 
    For each group, render a short summary + per-item rationale + estimated token savings. Keep it scannable; show the full `after` content only on request.
 
@@ -169,6 +173,8 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
 - **MCP detection (v5):** subagents.py and apply.py read `~/.agents/skills/auto-tune/security/connected_mcps.txt` to discover claude.ai-managed MCPs (e.g. `claude_ai_Atlassian_Rovo`). The auth cache at `~/.claude/mcp-needs-auth-cache.json` only lists MCPs that *need* auth — once authenticated, an MCP disappears from that cache, so the connected_mcps.txt file is the source of truth for "authenticated and ready." `MCP_ALIASES` in subagents.py maps the logical name `atlassian` to either `atlassian` (self-hosted) or `claude_ai_Atlassian_Rovo` (claude.ai-managed).
 - **Atlassian onboarding (v5):** designer-content cannot generate without an Atlassian MCP because it reads the user's UX copy guidelines on every invocation. When `gen-subagent:designer-content` is proposed and the user has no Atlassian MCP connected, apply.py refuses with: *"Run /mcp and authenticate Atlassian Rovo (or install a self-hosted atlassian MCP), then add the MCP name to `~/.agents/skills/auto-tune/security/connected_mcps.txt` and re-run /auto-tune."* The orchestrator surfaces this *before* asking for confirmations, so the user fixes it first.
 - **designer-content config:** the specific Confluence cloud_id, folder_id, and page IDs are user-specific and live in `config/designer-content.json` (gitignored). The shipped template in `prompts/subagent_templates/designer/content.md.tmpl` carries only placeholders; `subagents.py` substitutes values from the local config at generation time. If the config file is missing, the rendered subagent body includes a "configure me" notice instead of any specific values — nothing private leaks.
+- **designer-researcher Slack mode (v5.2):** researcher reads Slack channels via the `claude_ai_Slack` MCP, extracts UX pain points, writes a structured doc to `<cwd>/docs/feedback/<channel>-<date>.md`, walks the user through approve/skip/defer per item, then returns a structured payload to `designer-fullstack` for auto-routing. Strictly read-only (never posts, reacts, or DMs). Per-channel cursors at `cache/slack_cursors/<channel_id>.json` enable incremental scans — each invocation processes only new messages since the last successful scan. Cursor advances only on success; partial failure leaves it untouched so retry reprocesses.
+- **External skill finder (v5.3):** discovery's noise-reduction layer is in `discover.py`'s hard filters (skill-substance via deep-inspect, created-pushed gap, file-count floor, tightened spam-username and README-substance checks) and soft filters in `quality_score` (cross-provider corroboration boost, fork-ratio penalty, active-maintenance bonus, issue-engagement bonus, feedback-history adjustment, structure-score contribution). Editorial picks live in `security/curated_seeds.json` (committed); the user's install/reject history lives in `cache/feedback_history.json` (gitignored). `propose.py` groups external candidates by facet and caps at 3 per facet by default (override with `--max-per-facet N` or `--show-all`).
 
 ## Output style
 

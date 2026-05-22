@@ -170,6 +170,36 @@ def apply_add_mcp(item: dict, dry_run: bool) -> dict:
     }
 
 
+FEEDBACK_HISTORY_PATH = Path(__file__).resolve().parent.parent / "cache" / "feedback_history.json"
+
+
+def _log_feedback(decision: str, item: dict) -> None:
+    """v5.3: append a decision (install / reject) to feedback_history.json."""
+    try:
+        if FEEDBACK_HISTORY_PATH.is_file():
+            data = json.loads(FEEDBACK_HISTORY_PATH.read_text(encoding="utf-8"))
+        else:
+            data = {"installs": [], "rejections": []}
+    except json.JSONDecodeError:
+        data = {"installs": [], "rejections": []}
+    src = item.get("source_url") or item.get("html_url") or ""
+    import re as _re
+    m = _re.search(r"github\.com/([^/]+)/", src)
+    author = m.group(1).lower() if m else ""
+    entry = {
+        "candidate_name": item.get("candidate_name") or item.get("name") or item.get("id", "").split(":")[-1],
+        "source_url": src,
+        "author": author,
+        "facet": item.get("facet"),
+        "decision": decision,
+        ("installed_at" if decision == "install" else "rejected_at"): dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    bucket = "installs" if decision == "install" else "rejections"
+    data.setdefault(bucket, []).append(entry)
+    FEEDBACK_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FEEDBACK_HISTORY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def apply_add_skill_external(item: dict, dry_run: bool) -> dict:
     target = Path(item["target_path"])
     sha = item.get("quarantine_sha256")
@@ -195,6 +225,7 @@ def apply_add_skill_external(item: dict, dry_run: bool) -> dict:
     if not body.lstrip().startswith("---"):
         body = header + body
     target.write_text(body, encoding="utf-8")
+    _log_feedback("install", item)
     return {
         "status": "applied",
         "undo": f"rm -r {target.parent}",
@@ -406,6 +437,7 @@ def apply_swap_skill(item: dict, dry_run: bool) -> dict:
         return {"status": "skipped", "reason": f"{target_source} already exists; refusing to overwrite"}
     shutil.move(str(quarantined), str(target_source))
     new_link.symlink_to(target_source)
+    _log_feedback("install", {**item, "source_url": cand_url, "candidate_name": new_name})
     return {
         "status": "applied",
         "undo": (
@@ -498,6 +530,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--approved", default="", help="comma-separated proposal ids")
     p.add_argument("--all", dest="all_items", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--track-rejections", action="store_true",
+                   help="v5.3: log unapproved add-skill-external/swap-skill items to feedback_history.json as rejections")
     args = p.parse_args(argv)
 
     proposal = json.loads(Path(args.proposal).read_text(encoding="utf-8"))
@@ -534,6 +568,20 @@ def main(argv: list[str]) -> int:
                 "target": item.get("target_path"),
                 "undo": res.get("undo"),
             })
+
+    # v5.3 rejection tracking: items that were proposed but not approved get
+    # logged as rejections, so the next discovery run can downweight them.
+    if args.track_rejections and not args.dry_run and not args.all_items:
+        rejection_types = {"add-skill-external", "swap-skill"}
+        for item in items:
+            if item.get("type") not in rejection_types:
+                continue
+            if item["id"] in approved_ids:
+                continue
+            try:
+                _log_feedback("reject", item)
+            except Exception:  # noqa: BLE001
+                pass  # rejection logging is best-effort
 
     print(json.dumps({
         "applied": sum(1 for r in results if r["status"] == "applied"),

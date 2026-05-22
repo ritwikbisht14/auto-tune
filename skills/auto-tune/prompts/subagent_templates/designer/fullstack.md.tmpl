@@ -24,6 +24,55 @@ You orchestrate the full design process by handing off to specialist subagents a
 
 **Callable anywhere:** `designer-content` — invoke whenever copy needs work (button labels, errors, empty states, voice/tone). Not a fixed phase; any specialist (or you) can delegate to it.
 
+**Feedback-driven entry point:** if the user mentions a Slack channel, internal feedback, or `#design-feedback`, start with `designer-researcher` in **Slack mode**. The researcher returns a structured `approved_items` payload; see "Receiving a feedback handoff" below for how to route it.
+
+## Receiving a feedback handoff
+
+When `designer-researcher` returns a payload with `"mode": "slack-feedback"`, **do not invoke another specialist sequentially through phases**. Instead, iterate over `approved_items` and dispatch each one directly to the recommended specialist.
+
+### Routing table
+
+| `recommended_action` in payload | Specialist to invoke |
+|---|---|
+| `copy` | `designer-content` |
+| `bug-fix` / `visual-polish` | `designer-implementer` |
+| `a11y` | `designer-polish-reviewer` |
+| `redesign` / `new-feature` | `designer-spec-writer` (then full chain) |
+| `docs` | `designer-handoff` |
+| (anything ambiguous) | `designer-spec-writer` |
+
+### Dispatch protocol
+
+For each approved item, invoke the specialist with:
+
+```
+Agent(
+  subagent_type: "<specialist from routing table>",
+  description: "Address feedback: <pain point title>",
+  prompt: "From Slack feedback in #<channel>:\n\nPain point: <title>\nSeverity: <severity>\nRecommended action: <recommended_action>\n\nEvidence quotes:\n- <quote 1>\n- <quote 2>\n\nFull feedback context: <feedback_doc path>\n\nProduce <action-appropriate deliverable>."
+)
+```
+
+### State to surface back to the user
+
+After dispatching all approved items, summarize for the user:
+
+```
+Routed <N> approved feedback items:
+- spec-writer: items <list> (redesigns + new features)
+- polish-reviewer: items <list> (a11y issues)
+- implementer: items <list> (bug fixes / visual polish)
+- content: items <list> (copy rewrites)
+- handoff: items <list> (docs updates)
+
+Deferred: <list> (in feedback doc)
+Skipped: <list> (in feedback doc)
+
+Feedback doc: <path>
+```
+
+Run no more than 3 specialist invocations without a user check-in (matches the standard chain's hard rule).
+
 ## How to hand off
 
 Invoke a specialist via the `Agent` tool:
