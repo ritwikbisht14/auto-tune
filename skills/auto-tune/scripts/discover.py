@@ -42,8 +42,8 @@ TRUSTED_AUTHORS_PATH = SECURITY_DIR / "trusted_authors.txt"
 TRUSTED_REPOS_PATH = SECURITY_DIR / "trusted_repos.txt"
 WHITELISTED_AUTHORS_PATH = SECURITY_DIR / "whitelisted_authors.txt"
 
-TRUSTED_RELEVANCE_BOOST = 0.4
-TRUSTED_MIN_RELEVANCE = 0.1
+TRUSTED_RELEVANCE_BOOST = 0.15  # v5.4: was 0.40 — was too generous, let non-skill trusted-author repos pass
+TRUSTED_MIN_RELEVANCE = 0.25    # v5.4: was 0.10 — was too permissive, let zero-keyword trusted candidates through
 
 # Spam-username heuristics: bot-pattern usernames flagged in sandbox testing
 SPAM_USERNAME_PATTERNS = [
@@ -100,13 +100,19 @@ def load_community():
 
 
 def role_relevance(text: str, role: str) -> float:
+    """v5.4: word-boundary matching instead of substring `in`.
+
+    Earlier versions used `kw in text` which produced false positives like
+    "ui" matching "build", "spec" matching "respect", "ux" matching "buxom".
+    With `\\b{kw}\\b` we only count actual word matches.
+    """
     text = (text or "").lower()
     if not text:
         return 0.0
     kws = ROLE_KEYWORDS.get(role, set())
     if not kws:
         return 0.0
-    hits = sum(1 for kw in kws if kw in text)
+    hits = sum(1 for kw in kws if re.search(rf"\b{re.escape(kw)}\b", text))
     return min(1.0, hits / 4.0)
 
 
@@ -942,21 +948,22 @@ def main(argv: list[str]) -> int:
             if body_bytes < 200:
                 diagnostics.append({"_too_thin": url, "bytes": body_bytes, "sha256": sha256})
                 continue
-            if not is_trusted_author:
-                quarantine_path = Path(qf.get("quarantine_path", ""))
-                body_text = ""
-                if quarantine_path.is_file():
-                    try:
-                        body_text = quarantine_path.read_text(encoding="utf-8", errors="replace")
-                    except OSError:
-                        body_text = ""
-                if not readme_self_describes_claude(body_text):
-                    diagnostics.append({"_readme_no_claude": url, "sha256": sha256})
-                    continue
-                # v5.3 hard filter: README must show structural depth, not just mention Claude
-                if not is_trusted_author and not readme_has_substance(body_text):
-                    diagnostics.append({"_readme_too_thin": url, "sha256": sha256})
-                    continue
+            # v5.4: README substance checks now apply to ALL candidates, including
+            # trusted-author. Trusted-author bypass was over-reaching — letting
+            # demo/starter repos pass even when their README didn't show skill substance.
+            quarantine_path = Path(qf.get("quarantine_path", ""))
+            body_text = ""
+            if quarantine_path.is_file():
+                try:
+                    body_text = quarantine_path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    body_text = ""
+            if not readme_self_describes_claude(body_text):
+                diagnostics.append({"_readme_no_claude": url, "sha256": sha256, "trusted_author": is_trusted_author})
+                continue
+            if not readme_has_substance(body_text):
+                diagnostics.append({"_readme_too_thin": url, "sha256": sha256, "trusted_author": is_trusted_author})
+                continue
 
         # v5.3: gather soft signals for the candidate
         candidate_repo_key = repo_full_name(candidate_url)
@@ -1022,13 +1029,16 @@ def main(argv: list[str]) -> int:
         c["structure_score"] = round(s_score, 3)
         c["quality_score_v1"] = c.get("quality_score", 0.0)
 
-        # v5.3 hard filter: of the top deeply-inspected candidates, drop those
-        # that lack a SKILL.md path AND fail the file-count floor.
-        if not has_skill_substance(insp) and not passes_file_count_floor(insp):
+        # v5.4: strict — drop if no SKILL.md, regardless of other scaffolding.
+        # The v5.3 logic (drop only when BOTH substance AND file-count floor fail)
+        # was too permissive — a vercel-labs scaffold with examples/ passed the
+        # floor and stayed in even without SKILL.md. A real skill MUST have a SKILL.md.
+        if not has_skill_substance(insp):
             skill_substance_drops.append({
                 "_no_skill_substance": html,
                 "had_inspection": True,
-                "_note": "no SKILL.md found in top-level or skills/ subdir",
+                "_note": "no SKILL.md found in top-level or skills/ subdir (v5.4 strict)",
+                "trusted_author": c.get("trusted_author_boost", False),
             })
             c["_drop_for_no_substance"] = True
             continue

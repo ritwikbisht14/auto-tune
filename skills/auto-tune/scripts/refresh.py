@@ -122,6 +122,25 @@ def main(argv: list[str]) -> int:
             })
             continue
 
+        # v5.4 triple-gate: only emit swap-skill when the candidate is verifiably
+        # a real skill (has SKILL.md) AND genuinely role-relevant (not just
+        # trust-boosted) AND clears the score delta.
+        insp = top.get("inspection") or {}
+        if not insp.get("skill_md_path"):
+            diagnostics.append({
+                "facet": facet_name,
+                "_skip": f"top candidate {cand_name} has no SKILL.md (inspection.skill_md_path=None) — refusing swap",
+                "candidate_url": top.get("source_url") or top.get("html_url"),
+            })
+            continue
+        if float(top.get("role_relevance", 0.0)) < 0.5:
+            diagnostics.append({
+                "facet": facet_name,
+                "_skip": f"top candidate {cand_name} role_relevance {top.get('role_relevance', 0):.2f} < 0.5 — likely trust-boosted, not genuinely role-fit",
+                "candidate_url": top.get("source_url") or top.get("html_url"),
+            })
+            continue
+
         upgrades.append({
             "facet": facet_name,
             "installed": primary,
