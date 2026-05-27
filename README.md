@@ -15,6 +15,7 @@ Built by [Ritwik Bisht](https://github.com/ritwikbisht14) iteratively with Claud
 - **Gate** — every internet fetch passes through a host allowlist + content scanner. Downloads are quarantined and scanned for prompt-injection markers, shell-pipe-installs, credential paths, exfil callbacks, large base64 blobs, etc. before promotion.
 - **Subagent chains (designer)** — generate a filesystem-loaded chain of 8 specialists (orchestrator + ideation, researcher, content, spec-writer, implementer, polish-reviewer, handoff). Orchestrator runs on Opus, specialists on Sonnet — ~70% cost cut vs. all-Opus.
 - **Respect team-authored docs (v5.1)** — every CLAUDE.md auto-tune writes carries an HTML marker. Files without the marker are treated as team-authored and **never overwritten** — auto-tune offers an additive appendix instead.
+- **Cost-report diagnostics (v6)** — `/auto-tune --cost-report` ranks every loaded skill / MCP / CLAUDE.md / memory file / subagent by per-turn token cost, against actual 60-day usage. Read-only output; no proposals, no edits — surface measurements only. The full proposal flow (`/auto-tune`) then renders results in a strict four-section format: token savings → subagent chain → recommendations → summary.
 
 ## What it does NOT do
 
@@ -133,6 +134,8 @@ If you're running auto-tune on a **shared dev box, a teammate's machine, or any 
 - `--refresh` — also look for higher-quality community alternatives to your installed skills. Emits `swap-skill` items.
 - `--refresh-content` — re-fetch the designer-content Confluence catalog from the folder defined in your `config/designer-content.json`. Run when new pages are added.
 - `--branch-isolate` — append a fenced block to `<project>/.gitignore` so per-project auto-tune writes (CLAUDE.md, settings.local.json, agents/) stay in your tree only and don't merge into team branches. Idempotent.
+- `--cost-report` (v6) — run only the read-only token-cost measurement. Skips analyze/discover/propose/apply. Output: `cache/cost_report.json` + a scannable on-screen summary.
+- `--full` (v6) — run every step including the cost report at the end.
 
 ### Roles
 
@@ -172,12 +175,34 @@ export XAI_API_KEY="xai-..."
 
 Then run with `--providers github,rss,community,grok`. The prompt template is at [`skills/auto-tune/prompts/grok_xsearch.md`](skills/auto-tune/prompts/grok_xsearch.md) — tune it for your role.
 
+## Demo
+
+A self-contained demo folder lives at [`demo/AITS/`](demo/AITS/). It pretends to be **AITS — the Acme Internal Tooling Suite**, a realistic React component library with a deliberately bloated Claude Code setup (47-rule CLAUDE.md, extended `rules.md`, project `memory.md`, fat permissions, two MCP servers loaded, 9 skills installed). When you `cd` in and run `/auto-tune`, the proposal is dramatic and easy to point at.
+
+```bash
+# 1. Seed it (pick a role when prompted). Generates 22 synthetic Claude Code
+#    transcripts + memory files in ~/.claude/projects/-Users-<you>-AITS/
+python3 demo/AITS/.AITS/setup.py --role designer
+# (or --role engineer, --role pm)
+
+# 2. Run the demo
+cd demo/AITS
+claude
+/auto-tune --cost-report      # quick: token-cost diagnostics
+/auto-tune                    # full: prune-skill / prune-mcp / cleanup proposals
+
+# 3. Reset between runs
+python3 demo/AITS/.AITS/setup.py --reset
+```
+
+The full operator runbook is at [`demo/AITS/.AITS/runbook.md`](demo/AITS/.AITS/runbook.md). The visible project files (`README.md`, `.claude/CLAUDE.md`, `rules.md`, `memory.md`, `src/`) are deliberately written to look like a real internal repo — so Claude Code reads them on startup and behaves as if working in a production codebase, not narrating a pitch.
+
 ## Layout
 
 ```
 skills/auto-tune/
 ├── SKILL.md                  # orchestrator instructions (Claude reads this)
-├── scripts/                  # Python helpers — heavy lifting
+├── scripts/                  # Python helpers — heavy lifting (analyze, propose, apply, measure …)
 ├── prompts/                  # editable templates (CLAUDE.md, skill stub, Grok prompt)
 ├── security/
 │   ├── allowlist.txt
@@ -185,8 +210,18 @@ skills/auto-tune/
 │   ├── curators.txt
 │   ├── aggregator_lists.txt
 │   ├── whitelisted_authors.txt
+│   ├── curated_seeds.json
+│   ├── mcp_tool_counts.json  # v6 — MCP schema-size estimates
 │   └── quarantine/           # gitignored
 └── cache/                    # gitignored
+
+demo/AITS/                    # self-contained demo of auto-tune in action
+├── README.md / rules.md / memory.md / package.json / src/   # staged "Acme" repo
+├── .claude/                  # CLAUDE.md + settings.local.json (the bloat)
+└── .AITS/
+    ├── setup.py              # synthesizes transcripts + memory for a chosen role
+    ├── reset.sh              # one-line wipe
+    └── runbook.md            # operator guide (audience never sees this)
 ```
 
 ## License

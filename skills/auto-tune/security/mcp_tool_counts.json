@@ -1,0 +1,19 @@
+{
+  "_about": "Estimated MCP tool-surface cost per server, used by measure.py to compute per-turn token tax. Numbers are approximate observed defaults; edit to refine for your environment. Run `claude mcp list-tools <server>` if your CLI supports it to verify actual counts.",
+  "_schema": {
+    "approx_tools": "rough count of tools the server exposes",
+    "approx_schema_bytes": "rough total bytes the server's tool schemas add to the system prompt"
+  },
+  "servers": {
+    "chrome-devtools": {"approx_tools": 35, "approx_schema_bytes": 18000},
+    "figma-dev": {"approx_tools": 12, "approx_schema_bytes": 4000},
+    "atlassian": {"approx_tools": 30, "approx_schema_bytes": 15000},
+    "claude_ai_Atlassian_Rovo": {"approx_tools": 30, "approx_schema_bytes": 15000},
+    "claude_ai_Slack": {"approx_tools": 8, "approx_schema_bytes": 3500},
+    "claude_ai_Microsoft_365": {"approx_tools": 10, "approx_schema_bytes": 4500},
+    "claude_ai_Zoom_for_Claude": {"approx_tools": 6, "approx_schema_bytes": 2500},
+    "github": {"approx_tools": 20, "approx_schema_bytes": 9000},
+    "linear": {"approx_tools": 18, "approx_schema_bytes": 8000},
+    "_default": {"approx_tools": 10, "approx_schema_bytes": 4000}
+  }
+}

@@ -131,6 +131,7 @@ def analyze_session(jsonl_path: Path) -> dict | None:
     raw_tool_calls: Counter[str] = Counter()
     extensions: Counter[str] = Counter()
     skill_invocations: Counter[str] = Counter()
+    agent_invocations: Counter[str] = Counter()
     input_tokens = 0
     cache_read = 0
     cache_create = 0
@@ -165,6 +166,11 @@ def analyze_session(jsonl_path: Path) -> dict | None:
                     skill_name = inp.get("skill")
                     if skill_name:
                         skill_invocations[skill_name] += 1
+                if name == "Agent":
+                    inp = block.get("input") or {}
+                    subagent_type = inp.get("subagent_type")
+                    if subagent_type:
+                        agent_invocations[subagent_type] += 1
                 inp = block.get("input") or {}
                 for key in ("file_path", "path", "notebook_path"):
                     v = inp.get(key)
@@ -189,6 +195,7 @@ def analyze_session(jsonl_path: Path) -> dict | None:
         "raw_tool_calls": dict(raw_tool_calls),
         "extensions": dict(extensions),
         "skill_invocations": dict(skill_invocations),
+        "agent_invocations": dict(agent_invocations),
         "input_tokens": input_tokens,
         "cache_read_tokens": cache_read,
         "cache_create_tokens": cache_create,
@@ -217,6 +224,7 @@ def aggregate(sessions: list[dict]) -> dict:
         "raw_tool_calls": Counter(),
         "extensions": Counter(),
         "skill_invocations": Counter(),
+        "agent_invocations": Counter(),
         "input_tokens": 0,
         "cache_read_tokens": 0,
         "cache_create_tokens": 0,
@@ -224,7 +232,11 @@ def aggregate(sessions: list[dict]) -> dict:
         "intents": [],
     })
 
-    in_window: dict[str, dict] = defaultdict(lambda: {"tool_calls": Counter(), "skill_invocations": Counter()})
+    in_window: dict[str, dict] = defaultdict(lambda: {
+        "tool_calls": Counter(),
+        "skill_invocations": Counter(),
+        "agent_invocations": Counter(),
+    })
 
     for s in sessions:
         proj = s["cwd"] or "(unknown)"
@@ -234,6 +246,7 @@ def aggregate(sessions: list[dict]) -> dict:
         bucket["raw_tool_calls"].update(s["raw_tool_calls"])
         bucket["extensions"].update(s["extensions"])
         bucket["skill_invocations"].update(s["skill_invocations"])
+        bucket["agent_invocations"].update(s.get("agent_invocations", {}))
         bucket["input_tokens"] += s["input_tokens"]
         bucket["cache_read_tokens"] += s["cache_read_tokens"]
         bucket["cache_create_tokens"] += s["cache_create_tokens"]
@@ -247,6 +260,7 @@ def aggregate(sessions: list[dict]) -> dict:
         if ts and ts >= CUTOFF:
             in_window[proj]["tool_calls"].update(s["tool_calls"])
             in_window[proj]["skill_invocations"].update(s["skill_invocations"])
+            in_window[proj]["agent_invocations"].update(s.get("agent_invocations", {}))
 
     out_projects = {}
     for proj, b in by_project.items():
@@ -257,12 +271,14 @@ def aggregate(sessions: list[dict]) -> dict:
             "raw_tool_calls": dict(b["raw_tool_calls"]),
             "extensions": dict(b["extensions"]),
             "skill_invocations": dict(b["skill_invocations"]),
+            "agent_invocations": dict(b["agent_invocations"]),
             "input_tokens": b["input_tokens"],
             "cache_read_tokens": b["cache_read_tokens"],
             "cache_create_tokens": b["cache_create_tokens"],
             "last_ts": b["last_ts"],
             "in_window_tool_calls": dict(in_window[proj]["tool_calls"]),
             "in_window_skill_invocations": dict(in_window[proj]["skill_invocations"]),
+            "in_window_agent_invocations": dict(in_window[proj]["agent_invocations"]),
             "intent_clusters": [
                 {"count": c["count"], "members": c["members"][:5], "tokens": c["tokens"][:20]}
                 for c in clusters if c["count"] >= 2

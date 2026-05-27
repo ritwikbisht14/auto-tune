@@ -30,8 +30,10 @@ Parse from the user's message:
 - `--max-per-facet N` (v5.3) — cap external-skill candidates surfaced per facet. Default 3. Pass `--show-all` to disable the cap.
 - `--show-all` (v5.3) — include every external candidate, not just the top per facet. Useful when you want to audit what discovery dropped.
 - `--track-rejections` (passed to apply.py, v5.3) — log unapproved `add-skill-external` / `swap-skill` items as rejections in `cache/feedback_history.json` so the next discovery downweights them.
+- `--cost-report` (v6) — run only the read-only token-cost measurement step (step 11). Skips analyze/discover/compose/subagents/propose/apply. Output: `cache/cost_report.json` + a scannable summary in chat.
+- `--full` (v6) — run every step including the cost report at the end. Equivalent to default + `--discover` + `--refresh` + step 11.
 
-Default invocation = analyze current folder, detect corrections, propose, confirm each change, apply approved subset. No discovery unless `--discover` or `--global`.
+Default invocation = analyze current folder, detect corrections, propose, confirm each change, apply approved subset. No discovery unless `--discover` or `--global`. No cost report unless `--cost-report` or `--full`.
 
 ## How to run
 
@@ -147,7 +149,57 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    - `manual-find-skill` (v5) — surface a skill gap for the user to find externally; paste the URL back to /auto-tune to wire it in
    - `discovery-summary` (v5.3) — read-only info item shown at the top of the discovery section; lists how many candidates were filtered (spam-username, README-thin, created-pushed gap, etc.) and how many were capped by the per-facet limit. Helps the user sanity-check that good candidates weren't being dropped.
 
-   For each group, render a short summary + per-item rationale + estimated token savings. Keep it scannable; show the full `after` content only on request.
+   **Render the proposal using this exact four-section format** (the "AITS report format" — same on the proposal screen, the cost-report screen, and the final apply screen). Keep it scannable; the audience reads top-to-bottom.
+
+   ```
+   # Auto-tune — {role} setup detected
+
+   ## Token savings
+   - Loaded per turn (before): ~<n> tokens
+   - Loaded per turn (after applying all proposals): ~<n> tokens
+   - Estimated savings: ~<delta> tokens per turn
+   - Projected at ~50 messages/day: ~<n> tokens/day saved
+
+   ## Subagent chain ({role})
+   - <name> (<model>) — <one-line role>
+   - <name> (<model>) — <one-line role>
+   ...
+
+   ## Recommendations
+   **Prune skills (<n>)**
+   - <skill-name> — <one-line reason>
+   ...
+
+   **Disable MCPs (<n>)**
+   - <mcp-name> — <one-line reason; include `tools_used_60d` count>
+   ...
+
+   **CLAUDE.md cleanup (<n>)**
+   - <path> — <X of Y rules uncited; propose tightened version>
+   ...
+
+   **Memory hygiene (<n>)**
+   - <memory-file> — <last referenced N days ago / superseded by …>
+   ...
+
+   **Other (<n>)**
+   - <tweak-skill / restore-skill / add-skill-external / gen-subagent / etc.> — <one-line reason>
+   ...
+
+   ## Summary
+   <2–3 sentences. State the role detected, the headline savings number, and what's about to be proposed for approval. End with a one-line "approve which to apply?" lead-in.>
+   ```
+
+   Item-type → recommendation-category mapping (use this when building the Recommendations section):
+   - `prune-skill` → **Prune skills**
+   - `prune-mcp` → **Disable MCPs**
+   - `gen-claude-md` / `append-claude-md` → **CLAUDE.md cleanup**
+   - Memory-file flags (from `cache/cost_report.json` `type: "memory"` with stale signals) → **Memory hygiene**
+   - Everything else (`gen-skill`, `add-skill-external`, `recommend-agent-external`, `tweak-skill`, `personalize-skill`, `gen-subagent`, `swap-skill`, `restore-skill`, `add-mcp`, `add-hook`, `branch-isolate`, `manual-find-skill`, `discovery-summary`) → **Other**
+
+   For the **Subagent chain** section: pull from `cache/subagent_drafts.json` (after step 5b ran) and list each subagent with its model + a 6–12 word role description. If `subagent_drafts.json` is missing (e.g. `--cost-report` standalone with no prior compose), instead read `~/.claude/agents/*.md` for the user's currently-installed chain and list those.
+
+   Show the full `after` content of any single proposal only when the user explicitly asks for it ("show me the new CLAUDE.md", "what would the swap look like"). Don't paste full diffs by default.
 
 8. **Confirm**. Unless `--apply` was passed, use AskUserQuestion (multiSelect) to let the user pick which changes to approve per group. Default: nothing is applied without explicit selection.
 
@@ -157,7 +209,51 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
    ```
    The script writes one line per change to `~/.agents/skills/auto-tune/cache/log.jsonl` for audit/undo.
 
-10. **Report** back: applied count, skipped count, manual-action count, estimated total token savings, and the one-liner undo for each applied change (read from the log).
+10. **Report** back using the same AITS report format from step 7, but with applied results filled in:
+
+    ```
+    # Auto-tune — applied
+
+    ## Token savings
+    - Loaded per turn (before): ~<n> tokens
+    - Loaded per turn (now): ~<n> tokens
+    - Saved: ~<delta> tokens per turn
+    - Projected at ~50 messages/day: ~<n> tokens/day saved
+
+    ## Subagent chain ({role})
+    <same list as step 7; note which were newly created vs already-installed>
+
+    ## Recommendations applied
+    **Pruned skills (<n>)** — <names>
+    **Disabled MCPs (<n>)** — <names>
+    **CLAUDE.md cleanup** — <path> tightened (<X rules dropped>)
+    **Memory hygiene** — <n> files removed
+    **Other** — <n applied> (<names>)
+
+    ## Summary
+    <2 sentences. Total applied count, total skipped count, headline savings.
+    End with: "Undo any change with the matching line from
+    `~/.agents/skills/auto-tune/cache/log.jsonl`.">
+    ```
+
+    For the cost-report step (step 11) standalone, use the same format but
+    omit "Recommendations" and replace it with "Top offenders" — the
+    same one-line-per-item structure, just labeled differently to signal
+    "diagnostic, not proposal."
+
+11. **Cost report** (only when `--cost-report` or `--full` is set; v6):
+    ```
+    python3 ~/.agents/skills/auto-tune/scripts/measure.py --cwd <pwd> --signals ~/.agents/skills/auto-tune/cache/signals.json --out ~/.agents/skills/auto-tune/cache/cost_report.json
+    ```
+    Read `cache/cost_report.json` back and render a compact summary in chat:
+    - **Lead with the totals**: per-turn loaded bytes/tokens, subagent-chain bytes when invoked.
+    - **Top 5 offenders** by per-turn token cost, each with the one-line `user_actions_to_consider` rationale.
+    - For each item, do NOT paste full bodies — show name, type, per-turn or per-invocation cost, and the top action.
+    - Always end with: *"Full breakdown: `~/.agents/skills/auto-tune/cache/cost_report.json`. Read-only diagnostics — nothing has been changed. Apply suggestions manually when you're ready."*
+
+    **This step emits no proposals and applies no edits.** It is read-only diagnostics. The user reads the report and decides what to trim manually (deleting a skill symlink, disabling an MCP server, editing a CLAUDE.md, trimming a subagent's `tools:` allowlist). When `--cost-report` is set standalone, skip steps 3–10 entirely; the cost report uses `cache/signals.json` from the most recent analyze run.
+
+    If `cache/signals.json` is missing when `--cost-report` is invoked standalone, run step 3 (analyze) first, then proceed to step 11.
 
 ## Hard rules
 
@@ -175,6 +271,7 @@ The skill is a thin orchestrator. **All heavy work is done by Python scripts**; 
 - **designer-content config:** the specific Confluence cloud_id, folder_id, and page IDs are user-specific and live in `config/designer-content.json` (gitignored). The shipped template in `prompts/subagent_templates/designer/content.md.tmpl` carries only placeholders; `subagents.py` substitutes values from the local config at generation time. If the config file is missing, the rendered subagent body includes a "configure me" notice instead of any specific values — nothing private leaks.
 - **designer-researcher Slack mode (v5.2):** researcher reads Slack channels via the `claude_ai_Slack` MCP, extracts UX pain points, writes a structured doc to `<cwd>/docs/feedback/<channel>-<date>.md`, walks the user through approve/skip/defer per item, then returns a structured payload to `designer-fullstack` for auto-routing. Strictly read-only (never posts, reacts, or DMs). Per-channel cursors at `cache/slack_cursors/<channel_id>.json` enable incremental scans — each invocation processes only new messages since the last successful scan. Cursor advances only on success; partial failure leaves it untouched so retry reprocesses.
 - **External skill finder (v5.3):** discovery's noise-reduction layer is in `discover.py`'s hard filters (skill-substance via deep-inspect, created-pushed gap, file-count floor, tightened spam-username and README-substance checks) and soft filters in `quality_score` (cross-provider corroboration boost, fork-ratio penalty, active-maintenance bonus, issue-engagement bonus, feedback-history adjustment, structure-score contribution). Editorial picks live in `security/curated_seeds.json` (committed); the user's install/reject history lives in `cache/feedback_history.json` (gitignored). `propose.py` groups external candidates by facet and caps at 3 per facet by default (override with `--max-per-facet N` or `--show-all`).
+- **Cost report (v6) is read-only.** `measure.py` produces `cache/cost_report.json` with per-item token cost estimates and `user_actions_to_consider` strings. It emits NO proposals, takes NO approvals, and writes nothing outside `cache/`. The user reads the report and trims manually. Per-MCP token estimates come from the hand-maintained `security/mcp_tool_counts.json` reference table (user-editable). Per-skill and per-subagent measurements read the actual file bytes; CLAUDE.md rule-citation tracking uses bag-of-words keyword matching against assistant turns over the configured window (default 60 days).
 
 ## Output style
 

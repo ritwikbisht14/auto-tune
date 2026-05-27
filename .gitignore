@@ -21,6 +21,20 @@ skills/auto-tune/config/*.json
 # Backups created by apply.py
 **/*.autotune.bak
 
+# Demo (per-user state)
+demo/AITS/.claude/.role
+
+# Per-submission rule: never commit compiled binaries, deps, or build output
+node_modules/
+**/node_modules/
+vendor/
+**/vendor/
+dist/
+**/dist/
+build/
+**/build/
+*.tsbuildinfo
+
 # Python noise
 __pycache__/
 *.pyc

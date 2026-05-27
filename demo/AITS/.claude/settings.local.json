@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run tokens:build:*)",
+      "Bash(npm run storybook:*)",
+      "Bash(npm install:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "mcp__figma-dev__*",
+      "mcp__claude_ai_Atlassian_Rovo__getConfluencePage",
+      "mcp__claude_ai_Atlassian_Rovo__searchConfluenceUsingCql",
+      "mcp__claude_ai_Atlassian_Rovo__getConfluenceSpaces",
+      "mcp__claude_ai_Atlassian_Rovo__getJiraIssue",
+      "mcp__claude_ai_Atlassian_Rovo__searchJiraIssuesUsingJql",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__navigate_page"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(git push:*)",
+      "Bash(git push --force:*)",
+      "Bash(npm publish:*)",
+      "mcp__claude_ai_Atlassian_Rovo__createJiraIssue",
+      "mcp__claude_ai_Atlassian_Rovo__editJiraIssue",
+      "mcp__claude_ai_Atlassian_Rovo__transitionJiraIssue",
+      "mcp__claude_ai_Atlassian_Rovo__createConfluencePage",
+      "mcp__claude_ai_Atlassian_Rovo__updateConfluencePage"
+    ]
+  },
+  "env": {
+    "ACME_TENANT": "design-systems",
+    "ACME_FEATURE_FLAGS_PROFILE": "dev",
+    "AITS_TOKEN_VALIDATION": "strict"
+  }
+}
